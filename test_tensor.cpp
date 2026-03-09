@@ -15,15 +15,12 @@
 size_t cuda_mem_free() {
 	size_t mem_free, mem_total;
 	CUDA_CHECK(cudaMemGetInfo(&mem_free, &mem_total));
-	std::cout << "Free: " << mem_free << "\nTotal: " << mem_total << std::endl;
 	return mem_free;
 }
 
 void test_tensor_constructor() {
 	FloatTensor t = FloatTensor::zeros_1d(10);
-	std::cout << "Tensor constructed" << std::endl;
 	float x = t.get_raw_idx(3);
-	std::cout << "Value of zero: " << x << std::endl;
 	assert(x == 0.0f);
 	return;
 }
@@ -33,7 +30,6 @@ void test_value_assignment() {
 	float val = 2.42;
 	t.set_raw_idx(3, val);
 	float should_be_val = t.get_raw_idx(3);
-	std::cout << "Value was: " << val << " and now is: " << should_be_val << std::endl;
 	assert(should_be_val == val);
 	return;
 }
@@ -43,11 +39,7 @@ void test_move() {
 	t.set_raw_idx(0, 1.23);
 	t.set_raw_idx(1, 4.56);
 
-	std::cout << "Value at 0 now: " << t.get_raw_idx(0) << std::endl;
-	//std::cout << "Data is at: " << t.block_->data << std::endl;
 	t.move_to_device(Device::GPU);
-	std::cout << "Value at 0 now: " << t.get_raw_idx(0) << std::endl;
-	//std::cout << "Data is at: " << t.block_->data << std::endl;
 	t.set_raw_idx(0, 2.34);
 	float val0 = t.get_raw_idx(0);
 	float val1 = t.get_raw_idx(1);
@@ -72,6 +64,7 @@ void test_memory_not_wasted() {
 	t.move_to_device(Device::CPU);
 	size_t mem_after = cuda_mem_free();
 	assert(mem_after > mem_during);
+	assert(mem_after == mem_before);
 	return;
 }
 
@@ -114,4 +107,6 @@ int main() {
 	test_memory_not_wasted();
 	test_copy_mutability();
 	test_clone_mutability();
+
+	std::cout << "All tests passed."  << std::endl;
 }

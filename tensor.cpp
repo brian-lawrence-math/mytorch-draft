@@ -196,15 +196,9 @@ void FloatTensor::move_to_device(Device dev) {
 		return;
 	}
 
-	// debugging only:
-	std::cout << "Moving data" << std::endl;
-	std::cout << "Before move: " << this->block_->get_raw_idx(0) << std::endl;
-	
 	// copy the memory
 	std::shared_ptr<FloatBlock> new_block(this->block_->clone(dev));
 	this->block_ = new_block;
-
-	std::cout << "After move: " << this->block_->get_raw_idx(0) << std::endl;
 
 	// now the old this->block will lose one reference,
 	// and if necessary it will be automatically deallocated.
