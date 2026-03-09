@@ -10,10 +10,11 @@ EXT_SUFFIX := $(shell uv run python-config --extension-suffix)
 
 TARGET = test_tensor
 SRC = tensor.cpp test_tensor.cpp
+LOCAL_INCLUDES = tensor.h cuda_utils.h
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
+$(TARGET): $(SRC) $(LOCAL_INCLUDES)
 	$(GPP) $(CXXFLAGS) $(PYBIND11_INCLUDES) $(CUDA_INCLUDES) $(SRC) -o $(TARGET)
 
 debug:

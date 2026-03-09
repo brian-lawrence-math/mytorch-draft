@@ -2,26 +2,13 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
 #include <iostream>
 #include <vector>
 
 #include "tensor.h"
-
-// https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html
-#define CUDA_CHECK(expr) do {										\
-	cudaError_t result = expr;										\
-	if (result != cudaSuccess) {									\
-		fprintf(													\
-				stderr,												\
-				"CUDA runtime error: %s:%i:%d = %s\n",				\
-				__FILE__,											\
-				__LINE__,											\
-				result,												\
-				cudaGetErrorString(result));						\
-	}																\
-	throw std::runtime_error("CUDA error.");						\
-} while (0);															\
+#include "cuda_utils.h"
 
 float* alloc_float(size_t n, Device dev) {
 	void* p;
@@ -54,10 +41,11 @@ float read_float(float* p, Device dev) {
 	switch(dev) {
 	case Device::CPU:
 		return *p;
-	case Device::GPU:
-		float result;
+	case Device::GPU: {
+		float result = 0.0; // block compiler warning "result may be returned uninitialized"
 		CUDA_CHECK(cudaMemcpy(&result, p, sizeof(float), cudaMemcpyDeviceToHost));
 		return result;
+					  }
 	default:
 		throw std::runtime_error("Invalid device; code should be unreachable.");
 	}
@@ -67,8 +55,35 @@ void write_float(float* p, float val, Device dev) {
 	switch(dev) {
 	case Device::CPU:
 		*p = val;
+		break;
 	case Device::GPU:
 		CUDA_CHECK(cudaMemcpy(p, &val, sizeof(float), cudaMemcpyHostToDevice));
+		break;
+	}
+}
+
+void copy_floats(float* dst, Device dst_dev, float* src, Device src_dev, size_t n) {
+	size_t n_bytes = n * sizeof(float);
+	switch(dst_dev) {
+	case Device::CPU:
+		switch(src_dev) {
+		case Device::CPU:
+			std::memcpy(dst, src, n_bytes);
+			break;
+		case Device::GPU:
+			CUDA_CHECK(cudaMemcpy(dst, src, n_bytes, cudaMemcpyDeviceToHost));
+			break;
+		}
+		break;
+	case Device::GPU:
+		switch(src_dev) {
+		case Device::CPU:
+			CUDA_CHECK(cudaMemcpy(dst, src, n_bytes, cudaMemcpyHostToDevice));
+			break;
+		case Device::GPU:
+			CUDA_CHECK(cudaMemcpy(dst, src, n_bytes, cudaMemcpyDeviceToDevice));
+			break;
+		}
 	}
 }
 
@@ -127,15 +142,26 @@ public:
 		write_float(data + idx, val, dev);
 	}
 
-	FloatBlock* copy_cpu_to_gpu() {
-		FloatBlock* new_block = new FloatBlock(size, Device::GPU);
-		CUDA_CHECK(cudaMemcpy(new_block->data, data, size * sizeof(float), cudaMemcpyHostToDevice));
-		return new_block;
-	}
+	FloatBlock* clone(Device new_dev) {
+		// debug only:
+		std::cout << "Cloning data: " << std::endl;
+		std::cout << "Source address: " << data << std::endl;
+		std::cout << "First value at source: " << *data << std::endl;
 
-	FloatBlock* copy_gpu_to_cpu() {
-		FloatBlock* new_block = new FloatBlock(size, Device::CPU);
-		CUDA_CHECK(cudaMemcpy(new_block->data, data, size * sizeof(float), cudaMemcpyDeviceToHost));
+
+		FloatBlock* new_block = new FloatBlock(size, new_dev);
+		copy_floats(new_block->data, new_dev, this->data, this->dev, size);
+
+		std::cout << "Dest address: " << new_block->data << std::endl;
+		std::cout << "Attempting read of destination data from GPU." << std::endl;
+		
+		float val;
+		CUDA_CHECK(cudaMemcpy(&val, new_block->data, sizeof(float), cudaMemcpyDeviceToHost));
+		std::cout << "Destination value from GPU: " << val << std::endl;
+
+		std::cout << "Let's try get_raw_idx(): " << get_raw_idx(0) << std::endl;
+		std::cout << "And on the new block: " << new_block->get_raw_idx(0) << std::endl;
+
 		return new_block;
 	}
 };
@@ -143,7 +169,12 @@ public:
 
 
 FloatTensor::FloatTensor(std::shared_ptr<FloatBlock> block, size_t dim, std::vector<size_t> shape, std::vector<size_t> strides)
-	: block(block), dim(dim), shape(shape), strides(strides) {}
+	: block_(block), dim_(dim), shape_(shape), strides_(strides) {}
+
+// since FloatBlock cannot be copied,
+// need to explicitly write copy constructors for FloatTensor
+FloatTensor::FloatTensor(const FloatTensor& other) 
+	: block_(other.block_), dim_(other.dim_), shape_(other.shape_), strides_(other.strides_) { }
 
 FloatTensor FloatTensor::zeros_1d(size_t size) {
 	FloatBlock* block_raw = FloatBlock::zeros_cpu(size);
@@ -156,14 +187,39 @@ FloatTensor FloatTensor::zeros_1d(size_t size) {
 }
 
 float FloatTensor::get_raw_idx(size_t idx) {
-	return this->block->get_raw_idx(idx);
+	return this->block_->get_raw_idx(idx);
 }
 
 void FloatTensor::set_raw_idx(size_t idx, float val) {
-	this->block->set_raw_idx(idx, val);
+	this->block_->set_raw_idx(idx, val);
 }
 
-Device FloatTensor::dev() {
-	return block->dev;
+Device FloatTensor::dev_() {
+	return this->block_->dev;
 }
 
+FloatTensor FloatTensor::clone() {
+	std::shared_ptr<FloatBlock> new_block(this->block_->clone(this->dev_()));
+	return FloatTensor(new_block, dim_, shape_, strides_);
+}
+
+void FloatTensor::move_to_device(Device dev) {
+	if (dev == this->dev_()) {
+		return;
+	}
+
+	// debugging only:
+	std::cout << "Moving data" << std::endl;
+	std::cout << "Before move: " << this->block_->get_raw_idx(0) << std::endl;
+	
+	// copy the memory
+	std::shared_ptr<FloatBlock> new_block(this->block_->clone(dev));
+	this->block_ = new_block;
+
+	std::cout << "After move: " << this->block_->get_raw_idx(0) << std::endl;
+
+	// now the old this->block will lose one reference,
+	// and if necessary it will be automatically deallocated.
+	// Metadata remains unchanged.
+	return;
+}

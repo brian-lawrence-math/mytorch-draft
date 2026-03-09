@@ -13,10 +13,10 @@ enum class Device {
 struct FloatBlock;
 
 struct FloatTensor {
-	std::shared_ptr<FloatBlock> block;
-	size_t dim;
-	std::vector<size_t> shape;
-	std::vector<size_t> strides;
+	std::shared_ptr<FloatBlock> block_;
+	size_t dim_;
+	std::vector<size_t> shape_;
+	std::vector<size_t> strides_;
 
 
 	FloatTensor(std::shared_ptr<FloatBlock> block, size_t dim, std::vector<size_t> shape, std::vector<size_t> strides);
@@ -27,7 +27,11 @@ struct FloatTensor {
 
 	void set_raw_idx(size_t idx, float val);
 
-	Device dev();
+	Device dev_();
+
+	FloatTensor clone();
+
+	void move_to_device(Device);
 };
 
 
