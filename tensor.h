@@ -4,11 +4,12 @@
 #include <cstddef>
 #include <vector>
 
-// TODO: this should not be exposed
-struct FloatBlock {
-	float get_raw_idx(size_t idx);
-	void set_raw_idx(size_t idx, float val);
+enum class Device {
+	CPU,
+	GPU
 };
+
+struct FloatBlock;
 
 struct FloatTensor {
 	FloatBlock* block;
@@ -16,7 +17,16 @@ struct FloatTensor {
 	std::vector<size_t> shape;
 	std::vector<size_t> strides;
 
+
+	FloatTensor(FloatBlock* block, size_t dim, std::vector<size_t> shape, std::vector<size_t> strides);
+	FloatTensor(const FloatTensor& other);
 	static FloatTensor zeros_1d(size_t size);
+
+	float get_raw_idx(size_t idx);
+
+	void set_raw_idx(size_t idx, float val);
+
+	Device dev();
 };
 
 

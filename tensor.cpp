@@ -1,4 +1,3 @@
-#include <pybind11/pybind11.h>
 #include <cuda_runtime.h>
 
 #include <cstddef>
@@ -7,7 +6,7 @@
 #include <iostream>
 #include <vector>
 
-namespace py = pybind11;
+#include "tensor.h"
 
 // https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html
 #define CUDA_CHECK(expr) do {										\
@@ -23,11 +22,6 @@ namespace py = pybind11;
 	}																\
 	throw std::runtime_error("CUDA error.");						\
 } while (0);															\
-
-enum class Device {
-	CPU,
-	GPU
-};
 
 float* alloc_float(size_t n, Device dev) {
 	void* p;
@@ -152,32 +146,35 @@ struct FloatBlock {
 };
 
 
-struct FloatTensor {
-	FloatBlock* block;
-	size_t dim;
-	std::vector<size_t> shape;
-	std::vector<size_t> strides;
-	
-	FloatTensor(FloatBlock* block, size_t dim, std::vector<size_t> shape, std::vector<size_t> strides)
-		: block(block), dim(dim), shape(shape), strides(strides) {}
 
-	// copy constructor
-	FloatTensor(const FloatTensor& other) : block(other.block), dim(other.dim), shape(other.shape), strides(other.strides) {
-		block->refcount++;
-	}
+FloatTensor::FloatTensor(FloatBlock* block, size_t dim, std::vector<size_t> shape, std::vector<size_t> strides)
+	: block(block), dim(dim), shape(shape), strides(strides) {}
 
-	// TODO: copy assignment
-	//FloatTensor& operator=(const FloatTensor& other) : 
+// copy constructor
+FloatTensor::FloatTensor(const FloatTensor& other) : block(other.block), dim(other.dim), shape(other.shape), strides(other.strides) {
+	block->refcount++;
+}
 
-	static FloatTensor zeros_1d(size_t size) {
-		FloatBlock* block = FloatBlock::zeros_cpu(size);
-		size_t dim = 1;
-		std::vector<size_t> shape{size};
-		std::vector<size_t> strides{1};
-		return FloatTensor{block, dim, shape, strides};
-	}
+// TODO: copy assignment
+//FloatTensor& operator=(const FloatTensor& other) : 
 
-	Device dev() {
-		return block->dev;
-	}
-};
+FloatTensor FloatTensor::zeros_1d(size_t size) {
+	FloatBlock* block = FloatBlock::zeros_cpu(size);
+	size_t dim = 1;
+	std::vector<size_t> shape{size};
+	std::vector<size_t> strides{1};
+	return FloatTensor{block, dim, shape, strides};
+}
+
+float FloatTensor::get_raw_idx(size_t idx) {
+	return this->block->get_raw_idx(idx);
+}
+
+void FloatTensor::set_raw_idx(size_t idx, float val) {
+	this->block->set_raw_idx(idx, val);
+}
+
+Device FloatTensor::dev() {
+	return block->dev;
+}
+
