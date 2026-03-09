@@ -1,11 +1,16 @@
 #include <cuda_runtime.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <cassert>
 
 #include "cuda_utils.h"
 #include "tensor.h"
+
+// Not a good way to compare floats, it doesn't take scale into account...
+// but good enough for us right now because all our values are O(1).
+#define ASSERT_ALMOST_EQUAL(lhs, rhs) assert(std::abs((lhs) - (rhs)) < 0.0001);
 
 size_t cuda_mem_free() {
 	size_t mem_free, mem_total;
@@ -46,12 +51,14 @@ void test_move() {
 	t.set_raw_idx(0, 2.34);
 	float val0 = t.get_raw_idx(0);
 	float val1 = t.get_raw_idx(1);
-	assert(val0 == 2.34f && val1 == 4.56f);
+	ASSERT_ALMOST_EQUAL(val0, 2.34);
+	ASSERT_ALMOST_EQUAL(val1, 4.56);
 
 	t.move_to_device(Device::CPU);
 	float val2 = t.get_raw_idx(0);
 	float val3 = t.get_raw_idx(1);
-	assert(val2 == 2.34 && val3 == 4.56);
+	ASSERT_ALMOST_EQUAL(val2, 2.34);
+	ASSERT_ALMOST_EQUAL(val3, 4.56);
 	return;
 }
 
@@ -75,7 +82,10 @@ void test_copy_mutability() {
 	t2.set_raw_idx(1, 2.2);
 
 	assert(t1.block_ == t2.block_);
-	assert(t1.get_raw_idx(0) == 1.1 && t1.get_raw_idx(1) == 2.2 && t2.get_raw_idx(0) == 1.1 && t2.get_raw_idx(1) == 2.2);
+	ASSERT_ALMOST_EQUAL(t1.get_raw_idx(0), 1.1);
+	ASSERT_ALMOST_EQUAL(t1.get_raw_idx(1), 2.2);
+	ASSERT_ALMOST_EQUAL(t2.get_raw_idx(0), 1.1);
+	ASSERT_ALMOST_EQUAL(t2.get_raw_idx(1), 2.2);
 
 	return;
 }
@@ -90,7 +100,10 @@ void test_clone_mutability() {
 	t1.set_raw_idx(0, 3.3);
 
 	assert(t1.block_ != t2.block_);
-	assert(t1.get_raw_idx(0) == 3.3 && t1.get_raw_idx(1) == 0.0 && t2.get_raw_idx(0) == 1.1 && t2.get_raw_idx(1) == 2.2);
+	ASSERT_ALMOST_EQUAL(t1.get_raw_idx(0), 3.3);
+	ASSERT_ALMOST_EQUAL(t1.get_raw_idx(1), 0.0);
+	ASSERT_ALMOST_EQUAL(t2.get_raw_idx(0), 1.1);
+	ASSERT_ALMOST_EQUAL(t2.get_raw_idx(1), 2.2);
 	return;
 }
 

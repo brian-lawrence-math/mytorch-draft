@@ -144,23 +144,11 @@ public:
 
 	FloatBlock* clone(Device new_dev) {
 		// debug only:
-		std::cout << "Cloning data: " << std::endl;
-		std::cout << "Source address: " << data << std::endl;
-		std::cout << "First value at source: " << *data << std::endl;
-
-
 		FloatBlock* new_block = new FloatBlock(size, new_dev);
 		copy_floats(new_block->data, new_dev, this->data, this->dev, size);
-
-		std::cout << "Dest address: " << new_block->data << std::endl;
-		std::cout << "Attempting read of destination data from GPU." << std::endl;
 		
 		float val;
 		CUDA_CHECK(cudaMemcpy(&val, new_block->data, sizeof(float), cudaMemcpyDeviceToHost));
-		std::cout << "Destination value from GPU: " << val << std::endl;
-
-		std::cout << "Let's try get_raw_idx(): " << get_raw_idx(0) << std::endl;
-		std::cout << "And on the new block: " << new_block->get_raw_idx(0) << std::endl;
 
 		return new_block;
 	}
