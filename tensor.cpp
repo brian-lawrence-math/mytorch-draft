@@ -73,38 +73,40 @@ void write_float(float* p, float val, Device dev) {
 }
 
 
-// Reference-counted pointer to the data underlying a FloatTensor.
+// RAII: A FloatBlock manages the pointer to an array of floats.
+// The FloatBlock owns the memory: when the FloatBlock is destroyed,
+// the memory is deallocated.
 // Note that this pointer must be unique: only one FloatBlock should point
 // to the same data.
 struct FloatBlock {
+	// Doing manual memory management, rather than a smart pointer,
+	// to build understanding.
+	// Note this will require separate alloc/dealloc logic for CPU and GPU.
 	float* data;
 	size_t size;
-	size_t refcount;
 	Device dev;
+
+private:
+	FloatBlock(size_t size, Device dev) {
+		float* data = alloc_float(size, dev);
+		this->data = data;
+		this->size = size;
+		this->dev = dev;
+	}
+
+public:
+	~FloatBlock() {
+		dealloc_float(data, dev);
+	}
 
 	// disable copying
 	FloatBlock(const FloatBlock&) = delete;
 	FloatBlock& operator=(const FloatBlock&) = delete;
 
 	static FloatBlock* zeros_cpu(size_t size) {
-		Device dev = Device::CPU;
-		float* data = alloc_float(size, dev);
-		std::fill(data, data+size, 0.0f);
-		size_t refcount = 1;
-		return new FloatBlock{data, size, refcount, dev};
-	}
-
-	void inc_ref() {
-		this->refcount++;
-	}
-
-	void dec_ref() {
-		this->refcount--;
-		if(this->refcount == 0) {
-			dealloc_float(this->data, this->dev);
-			delete this;
-		}
-		return;
+		FloatBlock* block = new FloatBlock(size, Device::CPU);
+		std::fill(block->data, block->data+size, 0.0f);
+		return block;
 	}
 
 	void validate_raw_idx(size_t idx) {
@@ -126,40 +128,27 @@ struct FloatBlock {
 	}
 
 	FloatBlock* copy_cpu_to_gpu() {
-		Device new_dev = Device::GPU;
-		float* new_data = alloc_float(size, new_dev);
-		CUDA_CHECK(cudaMemcpy(new_data, data, size * sizeof(float), cudaMemcpyHostToDevice));
-		size_t new_size = size;
-		size_t new_refcount = 1;
-		return new FloatBlock{new_data, new_size, new_refcount, new_dev};
+		FloatBlock* new_block = new FloatBlock(size, Device::GPU);
+		CUDA_CHECK(cudaMemcpy(new_block->data, data, size * sizeof(float), cudaMemcpyHostToDevice));
+		return new_block;
 	}
 
 	FloatBlock* copy_gpu_to_cpu() {
-		Device new_dev = Device::CPU;
-		float* new_data = alloc_float(size, new_dev);
-		CUDA_CHECK(cudaMemcpy(new_data, data, size * sizeof(float), cudaMemcpyDeviceToHost));
-		size_t new_size = size;
-		size_t new_refcount = 1;
-		return new FloatBlock{new_data, new_size, new_refcount, new_dev};
+		FloatBlock* new_block = new FloatBlock(size, Device::CPU);
+		CUDA_CHECK(cudaMemcpy(new_block->data, data, size * sizeof(float), cudaMemcpyDeviceToHost));
+		return new_block;
 	}
-
 };
 
 
 
-FloatTensor::FloatTensor(FloatBlock* block, size_t dim, std::vector<size_t> shape, std::vector<size_t> strides)
+FloatTensor::FloatTensor(std::shared_ptr<FloatBlock> block, size_t dim, std::vector<size_t> shape, std::vector<size_t> strides)
 	: block(block), dim(dim), shape(shape), strides(strides) {}
 
-// copy constructor
-FloatTensor::FloatTensor(const FloatTensor& other) : block(other.block), dim(other.dim), shape(other.shape), strides(other.strides) {
-	block->refcount++;
-}
-
-// TODO: copy assignment
-//FloatTensor& operator=(const FloatTensor& other) : 
-
 FloatTensor FloatTensor::zeros_1d(size_t size) {
-	FloatBlock* block = FloatBlock::zeros_cpu(size);
+	FloatBlock* block_raw = FloatBlock::zeros_cpu(size);
+	std::shared_ptr<FloatBlock> block(block_raw);
+
 	size_t dim = 1;
 	std::vector<size_t> shape{size};
 	std::vector<size_t> strides{1};

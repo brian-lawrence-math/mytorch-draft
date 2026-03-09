@@ -2,6 +2,7 @@
 #define TENSOR_H
 
 #include <cstddef>
+#include <memory>
 #include <vector>
 
 enum class Device {
@@ -12,13 +13,13 @@ enum class Device {
 struct FloatBlock;
 
 struct FloatTensor {
-	FloatBlock* block;
+	std::shared_ptr<FloatBlock> block;
 	size_t dim;
 	std::vector<size_t> shape;
 	std::vector<size_t> strides;
 
 
-	FloatTensor(FloatBlock* block, size_t dim, std::vector<size_t> shape, std::vector<size_t> strides);
+	FloatTensor(std::shared_ptr<FloatBlock> block, size_t dim, std::vector<size_t> shape, std::vector<size_t> strides);
 	FloatTensor(const FloatTensor& other);
 	static FloatTensor zeros_1d(size_t size);
 
