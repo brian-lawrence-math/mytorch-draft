@@ -17,13 +17,16 @@ PRIORITIES in time order:
 
 OTHER TODOS:
 
-- Python assignment 'x2 = x1' should create new object with same data
+- Python initialize from list
 - Python __getitem__ and __setitem__
+- Python enable access to dim, shape, offset, strides, device
+- Python pretty print
+- Python assignment 'x2 = x1' should create new object with same data
 - Views and reshaping:
- - Allow creation of views by numpy-style indexing
- - Allow general reshaping
+	- Allow creation of views by numpy-style indexing
+	- Allow general reshaping
 - Additional operations:
- - range
- - random
- - sum along axis
+	- range
+	- random
+	- sum along axis
 
