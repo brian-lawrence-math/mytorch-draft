@@ -1,0 +1,29 @@
+PRIORITIES in time order:
+
+- tensor ops:
+ - CPU add, sub, mul
+ - CPU matmul
+ - GPU add, sub, mul
+ - GPU matmul
+
+- benchmarks:
+ - CPU
+ - GPU
+ - pytorch on GPU
+
+- begin optimization
+
+- keep a readme log and maybe git commits for optimization
+
+OTHER TODOS:
+
+- Python assignment 'x2 = x1' should create new object with same data
+- Python __getitem__ and __setitem__
+- Views and reshaping:
+ - Allow creation of views by numpy-style indexing
+ - Allow general reshaping
+- Additional operations:
+ - range
+ - random
+ - sum along axis
+

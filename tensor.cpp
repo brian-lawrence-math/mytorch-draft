@@ -154,15 +154,15 @@ public:
 	}
 };
 
-
-
-FloatTensor::FloatTensor(std::shared_ptr<FloatBlock> block, size_t dim, std::vector<size_t> shape, std::vector<size_t> strides)
-	: block_(block), dim_(dim), shape_(shape), strides_(strides) {}
+// Index into a tensor
+// ===================== Constructors ====================
+FloatTensor::FloatTensor(std::shared_ptr<FloatBlock> block, size_t dim, std::vector<size_t> shape, size_t offset, std::vector<size_t> strides)
+	: block_(block), dim_(dim), shape_(shape), offset_(offset), strides_(strides) {}
 
 // since FloatBlock cannot be copied,
 // need to explicitly write copy constructors for FloatTensor
 FloatTensor::FloatTensor(const FloatTensor& other) 
-	: block_(other.block_), dim_(other.dim_), shape_(other.shape_), strides_(other.strides_) { }
+	: block_(other.block_), dim_(other.dim_), shape_(other.shape_), offset_(other.offset_), strides_(other.strides_) { }
 
 FloatTensor FloatTensor::zeros_1d(size_t size) {
 	FloatBlock* block_raw = FloatBlock::zeros_cpu(size);
@@ -170,10 +170,12 @@ FloatTensor FloatTensor::zeros_1d(size_t size) {
 
 	size_t dim = 1;
 	std::vector<size_t> shape{size};
+	size_t offset = 0;
 	std::vector<size_t> strides{1};
-	return FloatTensor{block, dim, shape, strides};
+	return FloatTensor{block, dim, shape, offset, strides};
 }
 
+// =============== Indexing and shape management ==================
 float FloatTensor::get_raw_idx(size_t idx) {
 	return this->block_->get_raw_idx(idx);
 }
@@ -182,13 +184,78 @@ void FloatTensor::set_raw_idx(size_t idx, float val) {
 	this->block_->set_raw_idx(idx, val);
 }
 
+Index FloatTensor::validate_and_normalize_idx(const Index& idx) {
+	if (idx.coords.size() != this->dim_) {
+		throw std::length_error("Length of index must match dimension of tensor.");
+	}
+	std::vector<ssize_t> result{};
+	for (size_t d = 0; d < this->dim_; d++) {
+		if (idx.coords[d] >= (ssize_t)this->shape_[d] || idx.coords[d] < -(ssize_t)this->shape_[d]) {
+			throw std::out_of_range("Index into tensor out of range.");
+		}
+		size_t norm_coord = idx.coords[d] >= 0 ? idx.coords[d] : this->shape_[d] + idx.coords[d];
+		result.push_back(norm_coord);
+	}
+	return Index{result};
+}
+
+size_t FloatTensor::idx_to_raw_idx(Index idx) {
+	idx = validate_and_normalize_idx(idx);
+	ssize_t raw_idx = this->offset_;
+	for (size_t d = 0; d < this->dim_; d++) {
+		raw_idx += idx.coords[d] * this->strides_[d];
+	}
+	return (size_t)raw_idx;
+}
+
+float FloatTensor::get_idx(std::vector<ssize_t> coords) {
+	Index idx = Index{coords};
+	size_t raw_idx = idx_to_raw_idx(idx);
+	return get_raw_idx(raw_idx);
+}
+
+void FloatTensor::set_idx(std::vector<ssize_t> coords, float val) {
+	Index idx = Index{coords};
+	size_t raw_idx = idx_to_raw_idx(idx);
+	set_raw_idx(raw_idx, val);
+}
+
+// A rather hacky function.
+// Resets shapes and strides to give a contiguous view of the underlying base FloatBlock.
+// If 'this' currently has non-contiguous shape and strides (i.e. is a view),
+// they are discarded.
+// New_shape must be compatible with the size of the base FloatBlock.
+void FloatTensor::base_and_reshape(std::vector<size_t> new_shape) {
+	// Compute strides and offsets
+	// new_shape will be validated at the end so we only have to compute the product once
+	size_t new_dim = new_shape.size();
+	size_t new_offset = 0;
+	std::vector<size_t> new_strides(new_dim);
+	size_t cml_prod = 1;
+	for (size_t i = new_dim; i -- > 0; ) {
+		new_strides[i] = cml_prod;
+		cml_prod *= new_shape[i];
+	}
+	// validate
+	if ((size_t)cml_prod != this->block_->size) {
+		throw std::invalid_argument("New shape must match size of underlying base FloatBlock.");
+	}
+	
+	// great, all set, now reassign everything
+	this->dim_ = new_dim;
+	this->shape_ = new_shape;
+	this->offset_ = new_offset;
+	this->strides_ = new_strides;
+}
+
+// =================== Memory management ==========================
 Device FloatTensor::dev_() {
 	return this->block_->dev;
 }
 
 FloatTensor FloatTensor::clone() {
 	std::shared_ptr<FloatBlock> new_block(this->block_->clone(this->dev_()));
-	return FloatTensor(new_block, dim_, shape_, strides_);
+	return FloatTensor(new_block, dim_, shape_, offset_, strides_);
 }
 
 void FloatTensor::move_to_device(Device dev) {
