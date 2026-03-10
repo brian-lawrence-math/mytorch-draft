@@ -30,8 +30,8 @@ struct FloatTensor {
 	FloatTensor(std::shared_ptr<FloatBlock> block, size_t dim, std::vector<size_t> shape, size_t offset, std::vector<size_t> strides);
 	FloatTensor(const FloatTensor& other);
 	static FloatTensor zeros_1d(size_t size);
-	FloatTensor from_list_1d(std::vector<float> vals, Device dev);
-	FloatTensor uninitialized(std::vector<size_t> shape, Device dev);
+	static FloatTensor from_list_1d(std::vector<float> vals, Device dev);
+	static FloatTensor uninitialized(std::vector<size_t> shape, Device dev);
 
 	float get_raw_idx(size_t idx);
 	void set_raw_idx(size_t idx, float val);
@@ -52,6 +52,8 @@ struct FloatTensor {
 
 	void validate_same_shape(const FloatTensor& other);
 	FloatTensor add(FloatTensor& other);
+	FloatTensor sub(FloatTensor& other);
+	FloatTensor mul(FloatTensor& other);
 };
 
 

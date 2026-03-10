@@ -371,3 +371,34 @@ FloatTensor FloatTensor::add(FloatTensor& other) {
 	}
 	return result;
 }
+
+FloatTensor FloatTensor::sub(FloatTensor& other) {
+	validate_same_shape(other);
+
+	// allocate result
+	FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
+
+	// fill values one by one
+	for (size_t i = 0; i < this->numel(); i++) {
+		LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i});
+		float val = this->get_idx(log_idx) - other.get_idx(log_idx);
+		result.set_idx(log_idx, val);
+	}
+	return result;
+}
+
+FloatTensor FloatTensor::mul(FloatTensor& other) {
+	validate_same_shape(other);
+
+	// allocate result
+	FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
+
+	// fill values one by one
+	for (size_t i = 0; i < this->numel(); i++) {
+		LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i});
+		float val = this->get_idx(log_idx) * other.get_idx(log_idx);
+		result.set_idx(log_idx, val);
+	}
+	return result;
+}
+
