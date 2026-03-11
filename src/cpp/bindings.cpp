@@ -28,5 +28,6 @@ PYBIND11_MODULE(_core, mytorch, py::mod_gil_not_used()) {
 		.def("move_to_device", &FloatTensor::move_to_device)
 		.def("add", &FloatTensor::add)
 		.def("sub", &FloatTensor::sub)
-		.def("mul", &FloatTensor::mul);
+		.def("mul", &FloatTensor::mul)
+		.def("matmul", &FloatTensor::matmul);
 }

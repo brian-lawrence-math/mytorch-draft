@@ -36,7 +36,6 @@ struct FloatTensor {
 	float get_raw_idx(size_t idx);
 	void set_raw_idx(size_t idx, float val);
 	size_t numel();
-	LogicalIndex flat_idx_to_idx(const FlatLogicalIndex& idx);
 	LogicalIndex validate_and_normalize_idx(const LogicalIndex& idx);
 	size_t idx_to_raw_idx(LogicalIndex idx);
 	float get_idx(LogicalIndex idx);
@@ -51,9 +50,11 @@ struct FloatTensor {
 
 
 	void validate_same_shape(const FloatTensor& other);
+	std::vector<size_t> validate_matmul_shape(const FloatTensor& other);
 	FloatTensor add(FloatTensor& other);
 	FloatTensor sub(FloatTensor& other);
 	FloatTensor mul(FloatTensor& other);
+	FloatTensor matmul(FloatTensor& other);
 };
 
 

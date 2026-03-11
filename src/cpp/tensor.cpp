@@ -108,6 +108,19 @@ std::vector<size_t> reverse_cml_prod(std::vector<size_t> vals) {
 	return result;
 }
 
+LogicalIndex flat_idx_to_idx(const FlatLogicalIndex& idx, std::vector<size_t> shape) {
+	size_t flat_idx = idx.idx;
+	if (flat_idx > product(shape)) {
+		throw std::out_of_range("Index into tensor out of range.");
+	}
+	
+	std::vector<ssize_t> result(shape.size());
+	for(size_t d = shape.size(); d-- > 0; ) {
+		result[d] = flat_idx % shape[d];
+		flat_idx /= shape[d];
+	}
+	return LogicalIndex{result};
+}
 // RAII: A FloatBlock manages the pointer to an array of floats.
 // The FloatBlock owns the memory: when the FloatBlock is destroyed,
 // the memory is deallocated.
@@ -237,20 +250,6 @@ size_t FloatTensor::numel() {
 	return product(this->shape_);
 }
 
-LogicalIndex FloatTensor::flat_idx_to_idx(const FlatLogicalIndex& idx) {
-	size_t flat_idx = idx.idx;
-	if (flat_idx > numel()) {
-		throw std::out_of_range("Index into tensor out of range.");
-	}
-	
-	std::vector<ssize_t> result(this->dim_);
-	for(size_t d = this->dim_; d-- > 0; ) {
-		result[d] = flat_idx % this->shape_[d];
-		flat_idx /= this->shape_[d];
-	}
-	return LogicalIndex{result};
-}
-
 LogicalIndex FloatTensor::validate_and_normalize_idx(const LogicalIndex& idx) {
 	if (idx.coords.size() != this->dim_) {
 		throw std::length_error("Length of index must match dimension of tensor.");
@@ -357,6 +356,33 @@ void FloatTensor::validate_same_shape(const FloatTensor& other) {
 	}
 }
 
+std::vector<size_t> FloatTensor::validate_matmul_shape(const FloatTensor& other) {
+	// check that 'this @ other' is a sensible matmul
+	// and if so, return the shape of the product
+	
+	size_t tot_dim = this->shape_.size();
+	if (other.shape_.size() != tot_dim || tot_dim < 2) {
+		throw std::invalid_argument("Attempted matmul with invalid shapes.");
+	}
+
+	for (int idx = 0; idx < tot_dim - 2; idx++) {
+		if (other.shape_[idx] != this->shape_[idx]) {
+			throw std::invalid_argument("Attempted matmul with invalid shapes.");
+		}
+	}
+
+	// this.shape_[-1] should match other.shape_[-2]
+	if (this->shape_[tot_dim - 1] != other.shape_[tot_dim - 2]) {
+		throw std::invalid_argument("Attempted matmul with invalid shapes.");
+	}
+
+	// shape of the product
+	std::vector<size_t> result = this->shape_;
+	result[tot_dim - 1] = other.shape_[tot_dim - 1];
+
+	return result;
+}
+
 FloatTensor FloatTensor::add(FloatTensor& other) {
 	validate_same_shape(other);
 
@@ -365,7 +391,7 @@ FloatTensor FloatTensor::add(FloatTensor& other) {
 
 	// fill values one by one
 	for (size_t i = 0; i < this->numel(); i++) {
-		LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i});
+		LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
 		float val = this->get_idx(log_idx) + other.get_idx(log_idx);
 		result.set_idx(log_idx, val);
 	}
@@ -380,7 +406,7 @@ FloatTensor FloatTensor::sub(FloatTensor& other) {
 
 	// fill values one by one
 	for (size_t i = 0; i < this->numel(); i++) {
-		LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i});
+		LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
 		float val = this->get_idx(log_idx) - other.get_idx(log_idx);
 		result.set_idx(log_idx, val);
 	}
@@ -395,9 +421,40 @@ FloatTensor FloatTensor::mul(FloatTensor& other) {
 
 	// fill values one by one
 	for (size_t i = 0; i < this->numel(); i++) {
-		LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i});
+		LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
 		float val = this->get_idx(log_idx) * other.get_idx(log_idx);
 		result.set_idx(log_idx, val);
+	}
+	return result;
+}
+
+FloatTensor FloatTensor::matmul(FloatTensor& other) {
+	std::vector<size_t> result_shape = validate_matmul_shape(other);
+
+	// allocate the memory
+	FloatTensor result = FloatTensor::uninitialized(result_shape, this->dev_());
+
+	// iterate over result...
+	for (int flat_result_idx=0; flat_result_idx < product(result_shape); flat_result_idx++) {
+		// set up indices into all three tensors for the loop
+		LogicalIndex result_idx = flat_idx_to_idx(FlatLogicalIndex{flat_result_idx}, result_shape);
+		LogicalIndex this_idx = result_idx;
+		LogicalIndex other_idx = result_idx;
+		size_t loop_size = this->shape_[this->dim_ - 1];
+		
+		float cml_sum = (float)0.0;
+		std::cout << "Computing one entry of product matrix." << std::endl;
+		for (int i = 0; i < loop_size; i++) {
+			this_idx.coords[this->dim_ - 1] = i;
+			other_idx.coords[other.dim_ - 2] = i;
+			float this_val = this->get_idx(this_idx);
+			float other_val = other.get_idx(other_idx);
+			cml_sum += this_val * other_val;
+
+			std::cout << "   In matrix multiplication: adding " << this_val << " * " << other_val << std::endl;
+		}
+		std::cout << "  Computed value: " << cml_sum << std::endl << std::endl;
+		result.set_idx(result_idx, cml_sum);
 	}
 	return result;
 }
