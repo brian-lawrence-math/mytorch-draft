@@ -7,7 +7,7 @@
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(mytorch, mytorch, py::mod_gil_not_used()) {
+PYBIND11_MODULE(_core, mytorch, py::mod_gil_not_used()) {
 	mytorch.doc() = "A mock of pytorch's tensor library.";
 
 	py::native_enum<Device>(mytorch, "Device", "enum.Enum")
