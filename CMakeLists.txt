@@ -4,16 +4,26 @@ project(mytorch LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(PYBIND11_FIND_PYTHON ON)
+enable_language(CUDA)
 
 # Tell cmake where to find pybind11
 execute_process(COMMAND .venv/bin/python -m pybind11 --cmakedir
 	OUTPUT_VARIABLE pybind11_DIR
 	OUTPUT_STRIP_TRAILING_WHITESPACE)
 
-list(APPEND CMAKE_PREFIX_PATH $(pybind11_DIR))
+list(APPEND CMAKE_PREFIX_PATH ${pybind11_DIR})
 
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
+find_package(CUDAToolkit REQUIRED)
 
 pybind11_add_module(_core MODULE src/cpp/tensor.cpp src/cpp/bindings.cpp)
+
+target_link_libraries(_core PRIVATE CUDA::cudart)
+
+#/opt/cuda/targets/x86_64-linux
+set_target_properties(_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(_core PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+set_target_properties(_core PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/src/python/mytorch)
+
 install(TARGETS _core DESTINATION .)

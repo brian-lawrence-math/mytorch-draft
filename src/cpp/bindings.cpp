@@ -25,6 +25,7 @@ PYBIND11_MODULE(_core, mytorch, py::mod_gil_not_used()) {
 		.def("__setitem__", &FloatTensor::py_set_idx)
 		.def("base_and_reshape", &FloatTensor::base_and_reshape)
 		.def("clone", &FloatTensor::clone)
+		.def("move_to_device", &FloatTensor::move_to_device)
 		.def("add", &FloatTensor::add)
 		.def("sub", &FloatTensor::sub)
 		.def("mul", &FloatTensor::mul);
