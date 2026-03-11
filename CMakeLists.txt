@@ -16,4 +16,4 @@ find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
 
 pybind11_add_module(_core MODULE src/cpp/tensor.cpp src/cpp/bindings.cpp)
-install(TARGETS mytorch DESTINATION .)
+install(TARGETS _core DESTINATION .)

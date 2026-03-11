@@ -1,5 +1,5 @@
 from mytorch import FloatTensor as FT
-from mytorch.Device import CPU, GPU
+from mytorch import Device, CPU, GPU
 
 import pytest
 
