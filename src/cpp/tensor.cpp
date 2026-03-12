@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <iostream>
@@ -183,6 +184,19 @@ public:
 		return block;
 	}
 
+	static FloatBlock* randn_cpu(size_t size) {
+		std::random_device rd{};
+		std::mt19937 gen{rd()};
+		std::normal_distribution<float> d(0, 1);
+
+		FloatBlock* block = new FloatBlock(size, Device::CPU);
+		for (size_t idx = 0; idx < size; idx++) {
+			float rand_val = d(gen);
+			*(block->data + idx) = rand_val;
+		}
+		return block;
+	}
+
 	void validate_raw_idx(size_t idx) {
 		if (idx < 0 || idx >= size) {
 			throw std::out_of_range("Index out of range.");
@@ -260,6 +274,16 @@ FloatTensor FloatTensor::uninitialized(std::vector<size_t> shape, Device dev) {
 	return FloatTensor{block, dim, shape, offset, strides};
 }
 
+FloatTensor FloatTensor::randn(std::vector<size_t> shape) {
+	FloatBlock* block_raw = FloatBlock::randn_cpu(product(shape));
+	std::shared_ptr<FloatBlock> block(block_raw);
+
+	size_t dim = shape.size();
+	size_t offset = 0;
+	std::vector<ssize_t> strides = reverse_cml_prod(shape);
+	return FloatTensor{block, dim, shape, offset, strides};
+}
+	
 // ========================== Printing ============================
 std::string FloatTensor::raw_repr() {
 	// Raw format with three lines.

@@ -23,6 +23,7 @@ PYBIND11_MODULE(_core, mytorch, py::mod_gil_not_used()) {
 		.def_readonly("strides", &FloatTensor::strides_)
 		.def("zeros_1d", &FloatTensor::zeros_1d)
 		.def("from_list", &FloatTensor::from_list_1d)
+		.def("randn", &FloatTensor::randn)
 		.def("__repr__", &FloatTensor::raw_repr)
 		.def("get_raw_idx", &FloatTensor::get_raw_idx)
 		.def("set_raw_idx", &FloatTensor::set_raw_idx)
