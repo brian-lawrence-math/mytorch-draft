@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 #include <iostream>
 #include <vector>
 
@@ -87,6 +88,22 @@ void copy_floats(float* dst, Device dst_dev, float* src, Device src_dev, size_t 
 			break;
 		}
 	}
+}
+
+template <typename T> std::string array_to_string(T* arr, size_t n) {
+	std::string result = "[";
+	for (size_t i = 0; i < n; i++) {
+		result += std::to_string(*(arr + i));
+		if (i < n - 1) {
+			result += ", ";
+		}
+	}
+	result += "]";
+	return result;
+}
+
+template <typename T> std::string vector_to_string(std::vector<T> v) {
+	return array_to_string(v.data(), v.size());
 }
 
 // ========================== Helper methods for indexing =====================
@@ -241,6 +258,25 @@ FloatTensor FloatTensor::uninitialized(std::vector<size_t> shape, Device dev) {
 	size_t offset = 0;
 	std::vector<ssize_t> strides = reverse_cml_prod(shape);
 	return FloatTensor{block, dim, shape, offset, strides};
+}
+
+// ========================== Printing ============================
+std::string FloatTensor::raw_repr() {
+	// Raw format with three lines.
+	// Tensor:
+	//   Shape: [...], Offset: ..., Strides: [...],
+	//   Raw data: [...]
+
+	std::string shape_repr = vector_to_string<size_t>(this->shape_);
+	std::string offset_repr = std::to_string(this->offset_);
+	std::string strides_repr = vector_to_string(this->strides_);
+	std::string data_repr = array_to_string(this->block_->data, this->block_->size);
+
+	std::string head = "Tensor:\n";
+	std::string metadata = "  Shape: " + shape_repr + ", Offset: " + offset_repr + ", Strides: " + strides_repr + "\n";
+	std::string data = "  Raw data: " + data_repr + "\n";
+
+	return head + metadata + data;
 }
 
 // =============== Indexing and shape management ==================

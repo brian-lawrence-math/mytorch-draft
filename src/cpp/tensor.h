@@ -32,6 +32,7 @@ struct FloatTensor {
 	static FloatTensor zeros_1d(size_t size);
 	static FloatTensor from_list_1d(std::vector<float> vals, Device dev);
 	static FloatTensor uninitialized(std::vector<size_t> shape, Device dev);
+	std::string raw_repr();
 
 	float* data_ptr();
 	float get_raw_idx(size_t idx);

@@ -3,7 +3,7 @@ PRIORITIES in time order:
 - tensor ops:
  - DONE CPU add, sub, mul
  - DONE CPU matmul
- - GPU add, sub, mul
+ - DONE GPU add, sub, mul
  - GPU matmul
 
 - benchmarks:
