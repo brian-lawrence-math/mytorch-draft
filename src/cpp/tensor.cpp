@@ -10,7 +10,6 @@
 #include "tensor.h"
 #include "cuda_utils.h"
 #include "kernels.cuh"
-#include "shared_utils.h"
 
 // ======================== Memory management ========================
 float* alloc_float(size_t n, Device dev) {
@@ -197,6 +196,10 @@ public:
 	}
 };
 
+// =======================================================
+// ===================== FloatTensor =====================
+// =======================================================
+
 // ===================== Constructors ====================
 FloatTensor::FloatTensor(std::shared_ptr<FloatBlock> block, size_t dim, std::vector<size_t> shape, size_t offset, std::vector<size_t> strides)
 	: block_(block), dim_(dim), shape_(shape), offset_(offset), strides_(strides) {}
@@ -241,6 +244,10 @@ FloatTensor FloatTensor::uninitialized(std::vector<size_t> shape, Device dev) {
 }
 
 // =============== Indexing and shape management ==================
+float* FloatTensor::data_ptr() {
+	return this->block_->data;
+}
+
 float FloatTensor::get_raw_idx(size_t idx) {
 	return this->block_->get_raw_idx(idx);
 }

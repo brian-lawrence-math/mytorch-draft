@@ -3,7 +3,6 @@
 
 #include "tensor.h"
 #include "cuda_utils.h"
-#include "shared_utils.h"
 
 
 // Hard-coded constant specific to the RTX 3050
@@ -23,10 +22,6 @@ __device__ size_t product_device(size_t* vals, size_t n) {
 // shape is an array size_t[dim]
 // strides is another array size_t[dim] of the same size
 __device__ size_t flat_idx_to_raw_idx_device(size_t flat_idx, size_t* shape, size_t* strides, size_t dim) {
-	if (flat_idx > product_device(shape, dim)) {
-		throw std::out_of_range("Index into tensor out of range.");
-	}
-	
 	size_t result = 0;
 	for(size_t d = dim; d-- > 0; ) {
 		result += (flat_idx % *(shape + d)) * *(strides + d);
@@ -34,8 +29,6 @@ __device__ size_t flat_idx_to_raw_idx_device(size_t flat_idx, size_t* shape, siz
 	}
 	return result;
 }
-
-
 
 __global__ void add_contiguous(float* a, float* b, float* res, size_t len) {
 	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -74,10 +67,10 @@ __host__ void launch_add_contiguous(float* a, float* b, float* res, size_t len) 
 __host__ void launch_add(FloatTensor* a, FloatTensor* b, FloatTensor* res) {
 	size_t num_entries = a->numel();
 	if (num_entries < MAX_THREADS_PER_BLOCK) {
-		add<<<1, num_entries>>>(a->block_->data, b->block_->data, res->block_->data, a->shape_.data(), a->strides_.data(), b->strides_.data(), a->dim_());
+		add<<<1, num_entries>>>(a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(), a->strides_.data(), b->strides_.data(), a->dim_);
 	} else {
 		size_t n_blocks = (num_entries + MAX_THREADS_PER_BLOCK - 1) / MAX_THREADS_PER_BLOCK;
-		add<<<n_blocks, MAX_THREADS_PER_BLOCK>>>(a->block_->data, b->block_->data, res->block_->data, a->shape_.data(), a->strides_.data(), b->strides_.data(), a->dim_());
+		add<<<n_blocks, MAX_THREADS_PER_BLOCK>>>(a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(), a->strides_.data(), b->strides_.data(), a->dim_);
 	}
 }
 
