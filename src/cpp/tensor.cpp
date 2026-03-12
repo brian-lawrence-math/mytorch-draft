@@ -9,6 +9,8 @@
 
 #include "tensor.h"
 #include "cuda_utils.h"
+#include "kernels.cuh"
+#include "shared_utils.h"
 
 // ======================== Memory management ========================
 float* alloc_float(size_t n, Device dev) {
@@ -121,6 +123,7 @@ LogicalIndex flat_idx_to_idx(const FlatLogicalIndex& idx, std::vector<size_t> sh
 	}
 	return LogicalIndex{result};
 }
+
 // RAII: A FloatBlock manages the pointer to an array of floats.
 // The FloatBlock owns the memory: when the FloatBlock is destroyed,
 // the memory is deallocated.
@@ -389,11 +392,17 @@ FloatTensor FloatTensor::add(FloatTensor& other) {
 	// allocate result
 	FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
 
-	// fill values one by one
-	for (size_t i = 0; i < this->numel(); i++) {
-		LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
-		float val = this->get_idx(log_idx) + other.get_idx(log_idx);
-		result.set_idx(log_idx, val);
+	if(this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
+		std::cout << "WOW let's test this first kernel!" << std::endl;
+		launch_add_contiguous(this->block_->data, other.block_->data, result.block_->data, product(this->shape_));
+	} else {
+		// generic CPU code
+		// just fill values one by one
+		for (size_t i = 0; i < this->numel(); i++) {
+			LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
+			float val = this->get_idx(log_idx) + other.get_idx(log_idx);
+			result.set_idx(log_idx, val);
+		}
 	}
 	return result;
 }
@@ -435,7 +444,7 @@ FloatTensor FloatTensor::matmul(FloatTensor& other) {
 	FloatTensor result = FloatTensor::uninitialized(result_shape, this->dev_());
 
 	// iterate over result...
-	for (int flat_result_idx=0; flat_result_idx < product(result_shape); flat_result_idx++) {
+	for (size_t flat_result_idx=0; flat_result_idx < product(result_shape); flat_result_idx++) {
 		// set up indices into all three tensors for the loop
 		LogicalIndex result_idx = flat_idx_to_idx(FlatLogicalIndex{flat_result_idx}, result_shape);
 		LogicalIndex this_idx = result_idx;
