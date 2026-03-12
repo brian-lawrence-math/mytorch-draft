@@ -17,7 +17,7 @@ find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 
-pybind11_add_module(_core MODULE src/cpp/tensor.cpp src/cpp/bindings.cpp src/cpp/kernels.cu src/cpp/shared_utils.cpp)
+pybind11_add_module(_core MODULE src/cpp/tensor.cpp src/cpp/bindings.cpp src/cpp/kernels.cu)
 
 target_link_libraries(_core PRIVATE CUDA::cudart)
 

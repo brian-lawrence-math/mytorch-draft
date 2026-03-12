@@ -17,6 +17,10 @@ PYBIND11_MODULE(_core, mytorch, py::mod_gil_not_used()) {
 		.finalize();
 
 	py::class_<FloatTensor>(mytorch, "FloatTensor")
+		.def_readonly("dim", &FloatTensor::dim_)
+		.def_readonly("shape", &FloatTensor::shape_)
+		.def_readonly("offset", &FloatTensor::offset_)
+		.def_readonly("strides", &FloatTensor::strides_)
 		.def("zeros_1d", &FloatTensor::zeros_1d)
 		.def("from_list", &FloatTensor::from_list_1d)
 		.def("get_raw_idx", &FloatTensor::get_raw_idx)
@@ -24,6 +28,7 @@ PYBIND11_MODULE(_core, mytorch, py::mod_gil_not_used()) {
 		.def("__getitem__", &FloatTensor::py_get_idx)
 		.def("__setitem__", &FloatTensor::py_set_idx)
 		.def("base_and_reshape", &FloatTensor::base_and_reshape)
+		.def("base_reshape_restride", &FloatTensor::base_reshape_restride)
 		.def("clone", &FloatTensor::clone)
 		.def("move_to_device", &FloatTensor::move_to_device)
 		.def("add", &FloatTensor::add)

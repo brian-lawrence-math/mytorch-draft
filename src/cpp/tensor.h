@@ -25,9 +25,9 @@ struct FloatTensor {
 	size_t dim_;
 	std::vector<size_t> shape_;
 	size_t offset_;
-	std::vector<size_t> strides_;
+	std::vector<ssize_t> strides_;
 
-	FloatTensor(std::shared_ptr<FloatBlock> block, size_t dim, std::vector<size_t> shape, size_t offset, std::vector<size_t> strides);
+	FloatTensor(std::shared_ptr<FloatBlock> block, size_t dim, std::vector<size_t> shape, size_t offset, std::vector<ssize_t> strides);
 	FloatTensor(const FloatTensor& other);
 	static FloatTensor zeros_1d(size_t size);
 	static FloatTensor from_list_1d(std::vector<float> vals, Device dev);
@@ -44,6 +44,7 @@ struct FloatTensor {
 	float py_get_idx(std::vector<ssize_t> coords);
 	void py_set_idx(std::vector<ssize_t> coords, float val);
 	void base_and_reshape(std::vector<size_t> new_shape);
+	void base_reshape_restride(std::vector<size_t> new_shape, size_t new_offset, std::vector<ssize_t> new_strides);
 
 	Device dev_();
 	FloatTensor clone();

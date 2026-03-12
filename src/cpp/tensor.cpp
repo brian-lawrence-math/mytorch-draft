@@ -99,8 +99,8 @@ size_t product(std::vector<size_t> vals) {
 }
 
 // Helper method to convert tensor shape to tensor strides (row-major, following pytorch)
-std::vector<size_t> reverse_cml_prod(std::vector<size_t> vals) {
-	std::vector<size_t> result(vals.size());
+std::vector<ssize_t> reverse_cml_prod(std::vector<size_t> vals) {
+	std::vector<ssize_t> result(vals.size());
 	size_t cml_prod = 1;
 	for(size_t i = vals.size(); i-- > 0; ) {
 		result[i] = cml_prod;
@@ -201,7 +201,7 @@ public:
 // =======================================================
 
 // ===================== Constructors ====================
-FloatTensor::FloatTensor(std::shared_ptr<FloatBlock> block, size_t dim, std::vector<size_t> shape, size_t offset, std::vector<size_t> strides)
+FloatTensor::FloatTensor(std::shared_ptr<FloatBlock> block, size_t dim, std::vector<size_t> shape, size_t offset, std::vector<ssize_t> strides)
 	: block_(block), dim_(dim), shape_(shape), offset_(offset), strides_(strides) {}
 
 // since FloatBlock cannot be copied,
@@ -216,7 +216,7 @@ FloatTensor FloatTensor::zeros_1d(size_t size) {
 	size_t dim = 1;
 	std::vector<size_t> shape{size};
 	size_t offset = 0;
-	std::vector<size_t> strides{1};
+	std::vector<ssize_t> strides{1};
 	return FloatTensor{block, dim, shape, offset, strides};
 }
 
@@ -227,7 +227,7 @@ FloatTensor FloatTensor::from_list_1d(std::vector<float> vals, Device dev) {
 	size_t dim = 1;
 	std::vector<size_t> shape{vals.size()};
 	size_t offset = 0;
-	std::vector<size_t> strides{1};
+	std::vector<ssize_t> strides{1};
 
 	// initialize the values
 	copy_floats(block->data, dev, vals.data(), Device::CPU, vals.size());
@@ -239,7 +239,7 @@ FloatTensor FloatTensor::uninitialized(std::vector<size_t> shape, Device dev) {
 	std::shared_ptr<FloatBlock> block(block_raw);
 	size_t dim = shape.size();
 	size_t offset = 0;
-	std::vector<size_t> strides = reverse_cml_prod(shape);
+	std::vector<ssize_t> strides = reverse_cml_prod(shape);
 	return FloatTensor{block, dim, shape, offset, strides};
 }
 
@@ -305,7 +305,9 @@ void FloatTensor::py_set_idx(std::vector<ssize_t> coords, float val) {
 	set_idx(idx, val);
 }
 
-// A rather hacky function.
+// Two rather hacky functions to enable manual changes to shape and strides,
+// mostly for debugging.
+
 // Resets shapes and strides to give a contiguous view of the underlying base FloatBlock.
 // If 'this' currently has non-contiguous shape and strides (i.e. is a view),
 // they are discarded.
@@ -315,7 +317,7 @@ void FloatTensor::base_and_reshape(std::vector<size_t> new_shape) {
 	// new_shape will be validated at the end so we only have to compute the product once
 	size_t new_dim = new_shape.size();
 	size_t new_offset = 0;
-	std::vector<size_t> new_strides(new_dim);
+	std::vector<ssize_t> new_strides(new_dim);
 	size_t cml_prod = 1;
 	for (size_t i = new_dim; i -- > 0; ) {
 		new_strides[i] = cml_prod;
@@ -333,6 +335,41 @@ void FloatTensor::base_and_reshape(std::vector<size_t> new_shape) {
 	this->strides_ = new_strides;
 }
 
+// Validate shape, offset, and strides against numel.
+// Shape, offset, and strides should represent a valid view.
+// That is, any logical index within the bounds of shape,
+// when converted to a raw index using offset and strides,
+// should result in a raw index within the bounds of numel.
+void validate_shape_and_strides(size_t numel, std::vector<size_t> shape, size_t offset, std::vector<ssize_t> strides) {
+	ssize_t min_idx = offset;
+	ssize_t max_idx = offset;
+
+	size_t dim = shape.size();
+	if (strides.size() != dim) {
+		throw std::length_error("Shape and strides must have the same length.");
+	}
+	for (size_t idx = 0; idx < dim; idx++) {
+		ssize_t biggest_step = (shape[idx] - 1) * strides[idx];  // could be positive or negative 
+		min_idx += std::min((ssize_t)0, biggest_step);
+		max_idx += std::max((ssize_t)0, biggest_step);
+	}
+
+	if (min_idx < 0 || max_idx >= numel) {
+		throw std::range_error("Shape and strides cannot extend outside the base tensor.");
+	}
+}
+
+void FloatTensor::base_reshape_restride(std::vector<size_t> new_shape, size_t new_offset, std::vector<ssize_t> new_strides) {
+	validate_shape_and_strides(this->block_->size, new_shape, new_offset, new_strides);
+	
+	size_t new_dim = new_shape.size();
+
+	this->dim_ = new_dim;
+	this->shape_ = new_shape;
+	this->offset_ = new_offset;
+	this->strides_ = new_strides;
+}
+	
 // =================== Memory management ==========================
 Device FloatTensor::dev_() {
 	return this->block_->dev;
@@ -401,7 +438,8 @@ FloatTensor FloatTensor::add(FloatTensor& other) {
 
 	if(this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
 		std::cout << "WOW let's test this first kernel!" << std::endl;
-		launch_add_contiguous(this->block_->data, other.block_->data, result.block_->data, product(this->shape_));
+		//launch_add(this->block_->data, other.block_->data, result.block_->data, product(this->shape_));
+		launch_add(this, &other, &result);
 	} else {
 		// generic CPU code
 		// just fill values one by one
