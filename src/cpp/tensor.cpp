@@ -438,7 +438,6 @@ FloatTensor FloatTensor::add(FloatTensor& other) {
 
 	if(this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
 		std::cout << "WOW let's test this first kernel!" << std::endl;
-		//launch_add(this->block_->data, other.block_->data, result.block_->data, product(this->shape_));
 		launch_add(this, &other, &result);
 	} else {
 		// generic CPU code
@@ -458,11 +457,17 @@ FloatTensor FloatTensor::sub(FloatTensor& other) {
 	// allocate result
 	FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
 
-	// fill values one by one
-	for (size_t i = 0; i < this->numel(); i++) {
-		LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
-		float val = this->get_idx(log_idx) - other.get_idx(log_idx);
-		result.set_idx(log_idx, val);
+	if(this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
+		std::cout << "WOW let's test this first kernel!" << std::endl;
+		launch_sub(this, &other, &result);
+	} else {
+		// generic CPU code
+		// just fill values one by one
+		for (size_t i = 0; i < this->numel(); i++) {
+			LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
+			float val = this->get_idx(log_idx) - other.get_idx(log_idx);
+			result.set_idx(log_idx, val);
+		}
 	}
 	return result;
 }
@@ -473,11 +478,17 @@ FloatTensor FloatTensor::mul(FloatTensor& other) {
 	// allocate result
 	FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
 
-	// fill values one by one
-	for (size_t i = 0; i < this->numel(); i++) {
-		LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
-		float val = this->get_idx(log_idx) * other.get_idx(log_idx);
-		result.set_idx(log_idx, val);
+	if(this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
+		std::cout << "WOW let's test this first kernel!" << std::endl;
+		launch_mul(this, &other, &result);
+	} else {
+		// generic CPU code
+		// just fill values one by one
+		for (size_t i = 0; i < this->numel(); i++) {
+			LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
+			float val = this->get_idx(log_idx) * other.get_idx(log_idx);
+			result.set_idx(log_idx, val);
+		}
 	}
 	return result;
 }

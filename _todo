@@ -21,7 +21,7 @@ OTHER TODOS:
 - DONE Python __getitem__ and __setitem__
 
 - CUDA, improve error checking
-- Python enable access to dim, shape, offset, strides, device
+- DONE Python enable access to dim, shape, offset, strides, device
 - Python pretty print
 - Python __getitem__ and __setitem__, allow optional integer argument
 - Python assignment 'x2 = x1' should create new object with same data
