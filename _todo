@@ -27,6 +27,9 @@ OTHER TODOS:
 - Python assignment 'x2 = x1' should create new object with same data
 - C++, change ugly pointers to array indexing
 - Python implement __eq__
+- Python: tests:
+  - matmul and other ops, same result on CPU and GPU
+- Disable mixed CPU/GPU compute
 
 - Views and reshaping:
 	- Allow creation of views by numpy-style indexing
