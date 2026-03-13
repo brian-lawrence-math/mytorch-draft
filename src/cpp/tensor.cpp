@@ -294,7 +294,10 @@ std::string FloatTensor::raw_repr() {
 	std::string shape_repr = vector_to_string<size_t>(this->shape_);
 	std::string offset_repr = std::to_string(this->offset_);
 	std::string strides_repr = vector_to_string(this->strides_);
-	std::string data_repr = array_to_string(this->block_->data, this->block_->size);
+	std::string data_repr = "[Data on GPU]";
+	if (this->dev_() == Device::CPU) {
+		data_repr = array_to_string(this->block_->data, this->block_->size);
+	}
 
 	std::string head = "Tensor:\n";
 	std::string metadata = "  Shape: " + shape_repr + ", Offset: " + offset_repr + ", Strides: " + strides_repr + "\n";
@@ -559,23 +562,28 @@ FloatTensor FloatTensor::matmul(FloatTensor& other) {
 	// allocate the memory
 	FloatTensor result = FloatTensor::uninitialized(result_shape, this->dev_());
 
-	// iterate over result...
-	for (size_t flat_result_idx=0; flat_result_idx < product(result_shape); flat_result_idx++) {
-		// set up indices into all three tensors for the loop
-		LogicalIndex result_idx = flat_idx_to_idx(FlatLogicalIndex{flat_result_idx}, result_shape);
-		LogicalIndex this_idx = result_idx;
-		LogicalIndex other_idx = result_idx;
-		size_t loop_size = this->shape_[this->dim_ - 1];
-		
-		float cml_sum = (float)0.0;
-		for (int i = 0; i < loop_size; i++) {
-			this_idx.coords[this->dim_ - 1] = i;
-			other_idx.coords[other.dim_ - 2] = i;
-			float this_val = this->get_idx(this_idx);
-			float other_val = other.get_idx(other_idx);
-			cml_sum += this_val * other_val;
+	if(this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
+		std::cout << "CUDA matmul kernel" << std::endl;
+		launch_matmul(this, &other, &result);
+	} else {
+		// generic CPU code
+		for (size_t flat_result_idx=0; flat_result_idx < product(result_shape); flat_result_idx++) {
+			// set up indices into all three tensors for the loop
+			LogicalIndex result_idx = flat_idx_to_idx(FlatLogicalIndex{flat_result_idx}, result_shape);
+			LogicalIndex this_idx = result_idx;
+			LogicalIndex other_idx = result_idx;
+			size_t loop_size = this->shape_[this->dim_ - 1];
+			
+			float cml_sum = (float)0.0;
+			for (int i = 0; i < loop_size; i++) {
+				this_idx.coords[this->dim_ - 1] = i;
+				other_idx.coords[other.dim_ - 2] = i;
+				float this_val = this->get_idx(this_idx);
+				float other_val = other.get_idx(other_idx);
+				cml_sum += this_val * other_val;
+			}
+			result.set_idx(result_idx, cml_sum);
 		}
-		result.set_idx(result_idx, cml_sum);
 	}
 	return result;
 }

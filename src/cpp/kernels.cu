@@ -1,4 +1,6 @@
+#include <iostream>
 #include <stdexcept>
+#include <cstdio>
 #include <vector>
 
 #include "tensor.h"
@@ -86,6 +88,52 @@ __global__ void mul(float* tensor_a, float* tensor_b, float* tensor_res, size_t*
 	return;
 }
 
+__global__ void matmul(float* tensor_a, float* tensor_b, float* tensor_res, size_t* a_shape, ssize_t* a_strides, size_t a_offset, size_t* b_shape, ssize_t* b_strides, size_t b_offset, size_t dim) {
+	size_t flat_thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+	size_t num_entries = product_device(a_shape, dim-2) * *(a_shape + dim - 2) * *(b_shape + dim - 1);
+
+	if (flat_thread_idx < num_entries) {
+		// Compute a_idx and b_idx for the 0th step of the matmul
+		size_t a_idx = a_offset;
+		size_t b_idx = b_offset;
+
+		// save this value for later
+		size_t res_idx = flat_thread_idx;
+
+		// Process the last two dimensions manually
+		size_t last_idx = flat_thread_idx % *(b_shape + dim - 1);
+		b_idx += last_idx * *(b_strides + dim - 1);
+
+		flat_thread_idx /= *(b_shape + dim - 1);
+		size_t next_to_last_idx = flat_thread_idx % *(a_shape + dim - 2);
+		a_idx += next_to_last_idx * *(a_strides + dim - 2);
+
+		// The remaining indices are batch indices, just loop through them
+		for (size_t d = dim - 2; d-- > 0; ) {
+			flat_thread_idx /= *(a_shape + d + 1);
+			size_t curr_d_idx = flat_thread_idx % *(a_shape + d);
+			a_idx += curr_d_idx * *(a_strides + d);
+			b_idx += curr_d_idx * *(b_strides + d);
+		}
+
+		// Now a_idx, b_idx store the first indices to be multiplied.
+		// The others will be computed by adding a_step and b_step.
+		size_t a_step = *(a_strides + dim - 1);
+		size_t b_step = *(b_strides + dim - 2);
+
+		// Finally ready for the multiplication loop
+		float result = 0;
+		for (size_t mul_idx = 0; mul_idx < *(a_shape + dim - 1); mul_idx++) {
+			result += *(tensor_a + a_idx) * *(tensor_b + b_idx);
+			a_idx += a_step;
+			b_idx += b_step;
+		}
+
+		*(tensor_res + res_idx) = result;
+	}
+}
+
 // ============================= Launchers ======================================
 __host__ void launch_add_contiguous(float* a, float* b, float* res, size_t len) {
 	if (len < MAX_THREADS_PER_BLOCK) {
@@ -135,3 +183,19 @@ __host__ void launch_mul(FloatTensor* a, FloatTensor* b, FloatTensor* res) {
 	}
 	mul<<<n_blocks, threads_per_block>>>(a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(), a->strides_.data(), a->offset_, b->strides_.data(), b->offset_, a->dim_);
 }
+
+
+__host__ void launch_matmul(FloatTensor* a, FloatTensor* b, FloatTensor* res) {
+	size_t num_entries = res->numel();
+	size_t n_blocks, threads_per_block;
+	if (num_entries < MAX_THREADS_PER_BLOCK) {
+		n_blocks = 1;
+		threads_per_block = num_entries;
+	} else {
+		n_blocks = (num_entries + MAX_THREADS_PER_BLOCK - 1) / MAX_THREADS_PER_BLOCK;
+		threads_per_block = MAX_THREADS_PER_BLOCK;
+	}
+	matmul<<<n_blocks, threads_per_block>>>(a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(), a->strides_.data(), a->offset_, b->shape_.data(), b->strides_.data(), b->offset_, a->dim_);
+}
+
+

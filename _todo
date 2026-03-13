@@ -25,6 +25,8 @@ OTHER TODOS:
 - Python pretty print
 - Python __getitem__ and __setitem__, allow optional integer argument
 - Python assignment 'x2 = x1' should create new object with same data
+- C++, change ugly pointers to array indexing
+- Python implement __eq__
 
 - Views and reshaping:
 	- Allow creation of views by numpy-style indexing
