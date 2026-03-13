@@ -16,7 +16,7 @@
 __device__ size_t product_device(size_t* vals, size_t n) {
 	size_t cml_prod = 1;
 	for(size_t i = 0; i < n; i++) {
-		cml_prod *= *(vals + i);
+		cml_prod *= vals[i];
 	}
 	return cml_prod;
 }
@@ -26,8 +26,8 @@ __device__ size_t product_device(size_t* vals, size_t n) {
 __device__ size_t flat_idx_to_raw_idx_device(size_t flat_idx, size_t* shape, ssize_t* strides, size_t offset, size_t dim) {
 	ssize_t result = offset;
 	for(size_t d = dim; d-- > 0; ) {
-		result += (flat_idx % *(shape + d)) * *(strides + d);
-		flat_idx /= *(shape + d);
+		result += (flat_idx % shape[d]) * strides[d];
+		flat_idx /= shape[d];
 	}
 	return (size_t)result;
 }
@@ -52,8 +52,8 @@ __global__ void add(float* tensor_a, float* tensor_b, float* tensor_res, size_t*
 		size_t a_idx = flat_idx_to_raw_idx_device(idx, shape, a_strides, a_offset, dim);
 		size_t b_idx = flat_idx_to_raw_idx_device(idx, shape, b_strides, b_offset, dim);
 
-		float val = *(tensor_a + a_idx) + *(tensor_b + b_idx);
-		*(tensor_res + idx) = val;
+		float val = tensor_a[a_idx] + tensor_b[b_idx];
+		tensor_res[idx] = val;
 	}
 	return;
 }
@@ -67,8 +67,8 @@ __global__ void sub(float* tensor_a, float* tensor_b, float* tensor_res, size_t*
 		size_t a_idx = flat_idx_to_raw_idx_device(idx, shape, a_strides, a_offset, dim);
 		size_t b_idx = flat_idx_to_raw_idx_device(idx, shape, b_strides, b_offset, dim);
 
-		float val = *(tensor_a + a_idx) - *(tensor_b + b_idx);
-		*(tensor_res + idx) = val;
+		float val = tensor_a[a_idx] - tensor_b[b_idx];
+		tensor_res[idx] = val;
 	}
 	return;
 }
@@ -82,8 +82,8 @@ __global__ void mul(float* tensor_a, float* tensor_b, float* tensor_res, size_t*
 		size_t a_idx = flat_idx_to_raw_idx_device(idx, shape, a_strides, a_offset, dim);
 		size_t b_idx = flat_idx_to_raw_idx_device(idx, shape, b_strides, b_offset, dim);
 
-		float val = *(tensor_a + a_idx) * *(tensor_b + b_idx);
-		*(tensor_res + idx) = val;
+		float val = tensor_a[a_idx] * tensor_b[b_idx];
+		tensor_res[idx] = val;
 	}
 	return;
 }
@@ -91,7 +91,7 @@ __global__ void mul(float* tensor_a, float* tensor_b, float* tensor_res, size_t*
 __global__ void matmul(float* tensor_a, float* tensor_b, float* tensor_res, size_t* a_shape, ssize_t* a_strides, size_t a_offset, size_t* b_shape, ssize_t* b_strides, size_t b_offset, size_t dim) {
 	size_t flat_thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-	size_t num_entries = product_device(a_shape, dim-2) * *(a_shape + dim - 2) * *(b_shape + dim - 1);
+	size_t num_entries = product_device(a_shape, dim-2) * a_shape[dim - 2] * b_shape[dim - 1];
 
 	if (flat_thread_idx < num_entries) {
 		// Compute a_idx and b_idx for the 0th step of the matmul
@@ -102,35 +102,35 @@ __global__ void matmul(float* tensor_a, float* tensor_b, float* tensor_res, size
 		size_t res_idx = flat_thread_idx;
 
 		// Process the last two dimensions manually
-		size_t last_idx = flat_thread_idx % *(b_shape + dim - 1);
-		b_idx += last_idx * *(b_strides + dim - 1);
+		size_t last_idx = flat_thread_idx % b_shape[dim - 1];
+		b_idx += last_idx * b_strides[dim - 1];
 
-		flat_thread_idx /= *(b_shape + dim - 1);
-		size_t next_to_last_idx = flat_thread_idx % *(a_shape + dim - 2);
-		a_idx += next_to_last_idx * *(a_strides + dim - 2);
+		flat_thread_idx /= b_shape[dim - 1];
+		size_t next_to_last_idx = flat_thread_idx % a_shape[dim - 2];
+		a_idx += next_to_last_idx * a_strides[dim - 2];
 
 		// The remaining indices are batch indices, just loop through them
 		for (size_t d = dim - 2; d-- > 0; ) {
-			flat_thread_idx /= *(a_shape + d + 1);
-			size_t curr_d_idx = flat_thread_idx % *(a_shape + d);
-			a_idx += curr_d_idx * *(a_strides + d);
-			b_idx += curr_d_idx * *(b_strides + d);
+			flat_thread_idx /= a_shape[d + 1];
+			size_t curr_d_idx = flat_thread_idx % a_shape[d];
+			a_idx += curr_d_idx * a_strides[d];
+			b_idx += curr_d_idx * b_strides[d];
 		}
 
 		// Now a_idx, b_idx store the first indices to be multiplied.
 		// The others will be computed by adding a_step and b_step.
-		size_t a_step = *(a_strides + dim - 1);
-		size_t b_step = *(b_strides + dim - 2);
+		size_t a_step = a_strides[dim - 1];
+		size_t b_step = b_strides[dim - 2];
 
 		// Finally ready for the multiplication loop
 		float result = 0;
-		for (size_t mul_idx = 0; mul_idx < *(a_shape + dim - 1); mul_idx++) {
-			result += *(tensor_a + a_idx) * *(tensor_b + b_idx);
+		for (size_t mul_idx = 0; mul_idx < a_shape[dim - 1]; mul_idx++) {
+			result += tensor_a[a_idx] * tensor_b[b_idx];
 			a_idx += a_step;
 			b_idx += b_step;
 		}
 
-		*(tensor_res + res_idx) = result;
+		tensor_res[res_idx] = result;
 	}
 }
 
