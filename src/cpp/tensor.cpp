@@ -568,17 +568,13 @@ FloatTensor FloatTensor::matmul(FloatTensor& other) {
 		size_t loop_size = this->shape_[this->dim_ - 1];
 		
 		float cml_sum = (float)0.0;
-		std::cout << "Computing one entry of product matrix." << std::endl;
 		for (int i = 0; i < loop_size; i++) {
 			this_idx.coords[this->dim_ - 1] = i;
 			other_idx.coords[other.dim_ - 2] = i;
 			float this_val = this->get_idx(this_idx);
 			float other_val = other.get_idx(other_idx);
 			cml_sum += this_val * other_val;
-
-			std::cout << "   In matrix multiplication: adding " << this_val << " * " << other_val << std::endl;
 		}
-		std::cout << "  Computed value: " << cml_sum << std::endl << std::endl;
 		result.set_idx(result_idx, cml_sum);
 	}
 	return result;

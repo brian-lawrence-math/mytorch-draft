@@ -52,7 +52,6 @@ struct FloatTensor {
 	FloatTensor clone();
 	void move_to_device(Device);
 
-
 	void validate_same_shape(const FloatTensor& other);
 	std::vector<size_t> validate_matmul_shape(const FloatTensor& other);
 	FloatTensor add(FloatTensor& other);
