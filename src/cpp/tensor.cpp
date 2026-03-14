@@ -588,3 +588,40 @@ FloatTensor FloatTensor::matmul(FloatTensor& other) {
 	return result;
 }
 
+bool FloatTensor::is_contiguous() {
+	if (this->offset_ != 0) {
+		return false;
+	}
+	size_t cml_prod = 1;
+	for (size_t idx = this->dim_; idx-- > 0; ) {
+		if (this->strides_[idx] != cml_prod) {
+			return false;
+		}
+		cml_prod *= this->shape_[idx];
+	}
+	if (this->block_->size != cml_prod) {
+		return false;
+	}
+	return true;
+}
+
+FloatTensor FloatTensor::matmul_3d(FloatTensor& other) {
+	if (! this->is_contiguous() && ! other.is_contiguous()) {
+		throw std::invalid_argument("Function matmul_3d() only accepts contiguous tensors.");
+	}
+
+	if(this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
+		std::vector<size_t> result_shape = validate_matmul_shape(other);
+
+		// allocate the memory
+		FloatTensor result = FloatTensor::uninitialized(result_shape, this->dev_());
+
+		std::cout << "CUDA matmul_3d kernel" << std::endl;
+		launch_matmul_3d(this, &other, &result);
+
+		return result;
+	} else {
+		return this->matmul(other);
+	}
+}
+

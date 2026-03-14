@@ -50,6 +50,9 @@ class FloatTensor:
 	def matmul(self, other):
 		return FloatTensor(self._base.matmul(other._base))
 
+	def matmul_3d(self, other):
+		return FloatTensor(self._base.matmul_3d(other._base))
+
 	def __add__(self, other):
 		return self.add(other)
 

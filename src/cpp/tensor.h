@@ -58,6 +58,9 @@ struct FloatTensor {
 	FloatTensor sub(FloatTensor& other);
 	FloatTensor mul(FloatTensor& other);
 	FloatTensor matmul(FloatTensor& other);
+	
+	bool is_contiguous();
+	FloatTensor matmul_3d(FloatTensor& other);
 };
 
 

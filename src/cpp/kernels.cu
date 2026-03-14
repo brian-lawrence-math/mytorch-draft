@@ -134,6 +134,46 @@ __global__ void matmul(float* tensor_a, float* tensor_b, float* tensor_res, size
 	}
 }
 
+struct ContiguousTensor3d_Device {
+	float* data; size_t shape[3];
+};
+
+// special-case function: batched matmul for contiguous 3d tensors
+__global__ void matmul_3d(ContiguousTensor3d_Device a, ContiguousTensor3d_Device b, ContiguousTensor3d_Device res) {
+	size_t flat_thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+	size_t num_entries = res.shape[0] * res.shape[1] * res.shape[2];
+
+	if (flat_thread_idx < num_entries) {
+		// save a copy for the final assignment
+		size_t res_idx = flat_thread_idx;
+		
+		// convert flat_thread_idx to idx into res
+		size_t z_idx = flat_thread_idx % res.shape[2];
+		flat_thread_idx /= res.shape[2];
+		size_t y_idx = flat_thread_idx % res.shape[1];
+		flat_thread_idx /= res.shape[1];
+		size_t x_idx = flat_thread_idx;
+
+		// now the multiplication loop
+		// precompute starting idxs and step sizes for a and b
+		size_t a_idx = x_idx * a.shape[1] * a.shape[2] + y_idx * a.shape[2];
+		size_t b_idx = x_idx * b.shape[1] * b.shape[2] + z_idx;
+		size_t a_step = 1;
+		size_t b_step = b.shape[2];
+
+		float result = 0;
+
+		for (size_t mul_idx = 0; mul_idx < a.shape[2]; mul_idx ++) {
+			result += a.data[a_idx] * b.data[b_idx];
+			a_idx += a_step;
+			b_idx += b_step;
+		}
+
+		res.data[res_idx] = result;
+	}
+}
+
 // ============================= Launchers ======================================
 __host__ void launch_add_contiguous(float* a, float* b, float* res, size_t len) {
 	if (len < MAX_THREADS_PER_BLOCK) {
@@ -198,4 +238,26 @@ __host__ void launch_matmul(FloatTensor* a, FloatTensor* b, FloatTensor* res) {
 	matmul<<<n_blocks, threads_per_block>>>(a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(), a->strides_.data(), a->offset_, b->shape_.data(), b->strides_.data(), b->offset_, a->dim_);
 }
 
+
+ContiguousTensor3d_Device to_ct3d(FloatTensor* x) {
+	return ContiguousTensor3d_Device{x->data_ptr(), {x->shape_[0], x->shape_[1], x->shape_[2]}};
+}
+
+__host__ void launch_matmul_3d(FloatTensor* a, FloatTensor* b, FloatTensor* res) {
+	ContiguousTensor3d_Device a_device = to_ct3d(a);
+	ContiguousTensor3d_Device b_device = to_ct3d(b);
+	ContiguousTensor3d_Device res_device = to_ct3d(res);
+
+	size_t num_entries = res->numel();
+
+	size_t n_blocks, threads_per_block;
+	if (num_entries < MAX_THREADS_PER_BLOCK) {
+		n_blocks = 1;
+		threads_per_block = num_entries;
+	} else {
+		n_blocks = (num_entries + MAX_THREADS_PER_BLOCK - 1) / MAX_THREADS_PER_BLOCK;
+		threads_per_block = MAX_THREADS_PER_BLOCK;
+	}
+	matmul_3d<<<n_blocks, threads_per_block>>>(a_device, b_device, res_device);
+}
 

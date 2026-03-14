@@ -23,6 +23,7 @@ OTHER TODOS:
 - DONE Python __getitem__ and __setitem__, allow optional integer argument
 - DONE C++, change ugly pointers to array indexing
 
+- CUDA synchronize command, make it available to python
 - CUDA, improve error checking
 - Python pretty print
 - Python assignment 'x2 = x1' should create new object with same data

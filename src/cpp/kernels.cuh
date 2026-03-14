@@ -6,3 +6,4 @@ void launch_add(FloatTensor* a, FloatTensor* b, FloatTensor* res);
 void launch_sub(FloatTensor* a, FloatTensor* b, FloatTensor* res);
 void launch_mul(FloatTensor* a, FloatTensor* b, FloatTensor* res);
 void launch_matmul(FloatTensor* a, FloatTensor* b, FloatTensor* res);
+void launch_matmul_3d(FloatTensor* a, FloatTensor* b, FloatTensor* res);
