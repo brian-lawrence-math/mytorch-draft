@@ -39,6 +39,7 @@ OTHER TODOS:
 - Additional operations:
 	- range
 	- DONE random
+	- fix random so it's ok if odd num of values
 	- sum along axis
 	- scalar mul / div
 
@@ -46,4 +47,5 @@ NOTES:
 
 cuda-memcheck and valgrind
 bank conflicts and memory coalescing (4/32 bytes per sector)
+float4 and ldmatrix
 

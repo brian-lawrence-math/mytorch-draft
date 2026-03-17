@@ -24,6 +24,9 @@
 #define TILE_ROWS (8)
 #define TILE_COLS (8)
 
+// make sure blockDim.z is a multiple of warp size
+static_assert((TPB_ROW % 32 == 0));
+
 // Multiplication tensor(a, b) @ tensor(b, c) 
 // means a "multiplication loop" over the intermediate dimension of size b.
 // How many of those b entries to load into shared memory at once?
@@ -206,34 +209,43 @@ __global__ void matmul_tiled(ContiguousTensor3d_Device a, ContiguousTensor3d_Dev
 	float* b_batch_data = b.data + batch * b.shape[1] * b.shape[2];
 	float* res_batch_data = res.data + batch * res.shape[1] * res.shape[2];
 
-	// compute rows and cols
-	size_t start_row = (blockIdx.y * blockDim.y + threadIdx.y) * TILE_ROWS;
-	size_t start_col = (blockIdx.z * blockDim.z + threadIdx.z) * TILE_COLS;
+	// which entries is this thread responsible for?
+	size_t thread_idx_flat = threadIdx.y + blockDim.y * threadIdx.z;
+	size_t tot_threads_this_block = blockDim.y * blockDim.z;
+
+	size_t a_shared_n_entries = blockDim.z * TILE_ROWS * MUL_LOOP_TO_LOAD;
+	size_t b_shared_n_entries = MUL_LOOP_TO_LOAD * blockDim.y * TILE_COLS;
+
+	size_t a_shared_row_offset = blockIdx.z * blockDim.z * TILE_ROWS;
+	size_t b_shared_col_offset = blockIdx.y * blockDim.y * TILE_COLS;
 
 	for (size_t start_loop_idx = 0; start_loop_idx < a.shape[2]; start_loop_idx += MUL_LOOP_TO_LOAD) {
 		__syncthreads();
 
-		// collaboratively load:
-		// a[batch, start_row: start_row + TILE_ROWS, start_loop_idx: start_loop_idx + MUL_LOOP_TO_LOAD]
+		// collaboratively load (1, blockDim.z * TILE_ROWS, MUL_LOOP) values starting from
+		// a[batch, blockIdx.z * blockDim.z * TILE_ROWS, start_loop_idx]
 		// into
-		// a_shared[start_row_shared: start_row_shared + TILE_ROWS, : ]
+		// a_shared
+		// (note blockDim.z <= TPB_ROW always)
 		__shared__ float a_shared[TPB_ROW * TILE_ROWS][MUL_LOOP_TO_LOAD];
 
-		size_t start_row_shared = threadIdx.y * TILE_ROWS;
-		for (size_t i = 0; i < TILE_ROWS && start_row + i < a.shape[1]; i++) {
-			for (size_t j = 0; j < MUL_LOOP_TO_LOAD && start_loop_idx + j < a.shape[2]; j++) {
-				a_shared[start_row_shared + i][j] = a_batch_data[(start_row + i) * a.shape[2] + start_loop_idx + j];
+		// collaboratively fill up a_shared
+		for (size_t a_shared_idx = thread_idx_flat; a_shared_idx < a_shared_n_entries; a_shared_idx += tot_threads_this_block) {
+			size_t a_shared_row = a_shared_idx / MUL_LOOP_TO_LOAD;
+			size_t a_shared_col = a_shared_idx % MUL_LOOP_TO_LOAD;
+			if (a_shared_row_offset + a_shared_row < a.shape[1] && start_loop_idx + a_shared_col < a.shape[2]) {
+				a_shared[a_shared_row][a_shared_col] = a_batch_data[(a_shared_row_offset + a_shared_row) * a.shape[2] + start_loop_idx + a_shared_col];
 			}
 		}
-		
 
 		// b[batch, start_loop_idx: start_loop_idx + MUL_LOOP_TO_LOAD, start_col: start_col + TILE_ROWS]
 		__shared__ float b_shared[MUL_LOOP_TO_LOAD][TPB_COL * TILE_COLS];
 
-		size_t start_col_shared = threadIdx.z * TILE_COLS;
-		for (size_t i = 0; i < MUL_LOOP_TO_LOAD && start_loop_idx + i < b.shape[1]; i++) {
-			for (size_t j = 0; j < TILE_COLS && start_col + j < b.shape[2]; j++) {
-				b_shared[i][start_col_shared + j] = b_batch_data[(start_loop_idx + i) * b.shape[2] + (start_col + j)];
+		for (size_t b_shared_idx = thread_idx_flat; b_shared_idx < b_shared_n_entries; b_shared_idx += tot_threads_this_block) {
+			size_t b_shared_row = b_shared_idx / (blockDim.y * TILE_COLS);
+			size_t b_shared_col = b_shared_idx % (blockDim.y * TILE_COLS);
+			if (start_loop_idx + b_shared_row < b.shape[1] && b_shared_col_offset + b_shared_col < b.shape[2]) {
+				b_shared[b_shared_row][b_shared_col] = b_batch_data[(start_loop_idx + b_shared_row) * b.shape[2] + b_shared_col_offset + b_shared_col];
 			}
 		}
 
@@ -241,18 +253,19 @@ __global__ void matmul_tiled(ContiguousTensor3d_Device a, ContiguousTensor3d_Dev
 		// now that everything has been loaded into a_shared and b_shared,
 		// we can do some computation
 
-		for (size_t row = 0; row < TILE_ROWS && start_row + row < a.shape[1]; row++) {
-			for (size_t col = 0; col < TILE_COLS && start_col + col < b.shape[2]; col++) {
+		for (size_t row = threadIdx.z; row < blockDim.z * TILE_ROWS && a_shared_row_offset + row < a.shape[1]; row += blockDim.z) {
+			for (size_t col = threadIdx.y; col < blockDim.y * TILE_COLS && b_shared_col_offset + col < b.shape[2]; col += blockDim.y) {
+				// am I doing too much computation in this loop?
 				float cml_sum = 0.0;
 
 				for (size_t loop_idx = 0; loop_idx < MUL_LOOP_TO_LOAD && start_loop_idx + loop_idx < a.shape[2]; loop_idx++) {
-					cml_sum += a_shared[start_row_shared + row][loop_idx] * b_shared[loop_idx][start_col_shared + col];
+					cml_sum += a_shared[row][loop_idx] * b_shared[loop_idx][col];
 				}
 			
 				// make the update
 				// don't worry about synchronization or atomic add because
 				// I'm the only thread touching this entry of res
-				res_batch_data[(start_row + row) * res.shape[2] + (start_col + col)] += cml_sum;
+				res_batch_data[(a_shared_row_offset + row) * res.shape[2] + (b_shared_col_offset + col)] += cml_sum;
 			}
 		}
 	}
@@ -374,22 +387,22 @@ __host__ void launch_matmul_tiled(FloatTensor* a, FloatTensor* b, FloatTensor* r
 	size_t row_threads = (n_rows + TILE_ROWS - 1) / TILE_ROWS;
 
 	if (row_threads > TPB_ROW) {
-		tpb_y = TPB_ROW;
-		grid_dim_y = (row_threads + TPB_ROW - 1) / TPB_ROW;
+		tpb_z = TPB_ROW;
+		grid_dim_z = (row_threads + TPB_ROW - 1) / TPB_ROW;
 	} else {
-		tpb_y = row_threads;
-		grid_dim_y = 1;
+		tpb_z = row_threads;
+		grid_dim_z = 1;
 	}
 
 	// cols
 	size_t col_threads = (n_cols + TILE_COLS - 1) / TILE_COLS;
 
 	if (col_threads > TPB_COL) {
-		tpb_z = TPB_COL;
-		grid_dim_z = (col_threads + TPB_COL - 1) / TPB_COL;
+		tpb_y = TPB_COL;
+		grid_dim_y = (col_threads + TPB_COL - 1) / TPB_COL;
 	} else {
-		tpb_z = col_threads;
-		grid_dim_z = 1;
+		tpb_y = col_threads;
+		grid_dim_y = 1;
 	}
 
 	dim3 blocks(grid_dim_x, grid_dim_y, grid_dim_z);

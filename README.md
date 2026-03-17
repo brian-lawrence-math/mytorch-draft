@@ -163,6 +163,54 @@ The results: 800ms slows down to 1.85 sec.  Terrible.
 The profiler tells me that L1 cache is the bottleneck: L1 cache throughput is at 98%.  
 I suppose, by putting everything in shared memory, I'm creating too much strain on that one resource...
 
+## Improving memory access patterns
+
+Global memory is stored in DRAM; shared memory (and the L1 cache) are stored in SRAM.
+DRAM reads memory in consecutive 32-byte chunks; if I don't use all 32 bytes, I'm wasting bandwidth.
+SRAM memory is stored in 32 banks (each 4 bytes wide -- so for example bank 0 is responible for addresses 0, 1, 2, 3 modulo 128).
+In a single read, SRAM can read any 4-bite word from each of its 32 banks, independently.
+So we want each thread in a warp to try to read from a different bank.
+If multiple threads request data from the same bank, the result is a "bank conflict":
+the SRAM will have to perform multiple physical reads before the result can be returned.
+
+In both situations, a good pattern is for the 32 threads in a warp to access consecutive floats in memory:
+idx = threadIdx.x;
+data[idx] ... .
+
+First, I'll make sure the number of rows in each block of threads is 32 (at least when the matrices have >= 32 rows);
+this means each warp is exactly one row.
+
+Now let's plan how to arrange memory and threads.  As far as memory:
+- The input tensors are already laid out contiguous in row-major order, we can't change that;
+- The result tensor is also in row-major order; we can't touch it either;
+- But the "shared" tensors (copies of tiles of input tensors that reside in shared memory) can be arranged how we like.
+
+And as far as thread arrangement, we have to decide how to divide up each of these three operations among threads in the block:
+- Copy input tensor a into shared memory;
+- Copy input tensor b into shared memory;
+- Perform the "multiplication loop" to compute entries of output tensor.
+
+Let's start with the entries of the output tensor.  Conceptually it looks something like the following.
+1: for (loop_idx = 0; ... ) {
+2:     cml_sum += a_shared[row][loop_idx] * b_shared[loop_idx][col];
+3: }
+4: result[row][col] += cml_sum;
+
+A natural choice is to have consecutive threads operate on the same "row" and consecutive "col":
+this way the global memory writes at line 4 are efficient, with all 32 threads in the warp
+writing to one 128-bit line of global memory (or two lines, if the alignment isn't right).
+Assuming b_shared is stored in row-major order, the shared memory reads in line 2 are good as well:
+all threads read the same entry from a_shared, which is efficient (it's called "broadcasting"),
+and the 32 threads write to 32 consecutive entries of b_shared.
+
+As for copying global 'a' and 'b' into shared 'a_shared' and 'b_shared': it's the same idea.
+I store 'a_shared' and 'b_shared' in row-major order, so data that is contiguous in 'a' 
+is also contiguous in 'a_shared'.
+Then I arrange for all the threads in the block to handle consecutive floats, one float each.
+
+Anyway, this gives me a substantial speedup: the benchmark is down to 340ms.
+
+
 
 
 

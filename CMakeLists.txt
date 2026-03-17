@@ -20,11 +20,18 @@ find_package(CUDAToolkit REQUIRED)
 pybind11_add_module(_core MODULE src/cpp/tensor.cpp src/cpp/bindings.cpp src/cpp/kernels.cu)
 
 add_executable(bench src/cpp/tensor.cpp src/cpp/kernels.cu tests/cpp/bench_matmul.cpp)
+add_executable(debug src/cpp/tensor.cpp src/cpp/kernels.cu tests/cpp/debug_matmul.cpp)
 
 target_link_libraries(_core PRIVATE CUDA::cudart)
 target_link_libraries(bench PRIVATE CUDA::cudart)
+target_link_libraries(debug PRIVATE CUDA::cudart)
 target_link_libraries(_core PRIVATE CUDA::curand)
 target_link_libraries(bench PRIVATE CUDA::curand)
+target_link_libraries(debug PRIVATE CUDA::curand)
+
+target_compile_options(debug PRIVATE
+    -g $<$<COMPILE_LANGUAGE:CUDA>:-G>
+)
 
 #/opt/cuda/targets/x86_64-linux
 set_target_properties(_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -32,5 +39,6 @@ set_target_properties(_core PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 set_target_properties(_core PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/src/python/mytorch)
 
 target_include_directories(bench PRIVATE src/cpp)
+target_include_directories(debug PRIVATE src/cpp)
 
 install(TARGETS _core DESTINATION .)
