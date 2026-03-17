@@ -29,10 +29,11 @@ struct FloatTensor {
 
 	FloatTensor(std::shared_ptr<FloatBlock> block, size_t dim, std::vector<size_t> shape, size_t offset, std::vector<ssize_t> strides);
 	FloatTensor(const FloatTensor& other);
+	static FloatTensor zeros(std::vector<size_t> shape, Device dev);
 	static FloatTensor zeros_1d(size_t size);
 	static FloatTensor from_list_1d(std::vector<float> vals, Device dev);
 	static FloatTensor uninitialized(std::vector<size_t> shape, Device dev);
-	static FloatTensor randn(std::vector<size_t> shape);
+	static FloatTensor randn(std::vector<size_t> shape, Device dev);
 	std::string raw_repr();
 
 	float* data_ptr();
@@ -61,6 +62,7 @@ struct FloatTensor {
 	
 	bool is_contiguous();
 	FloatTensor matmul_3d(FloatTensor& other);
+	FloatTensor matmul_tiled(FloatTensor& other);
 };
 
 

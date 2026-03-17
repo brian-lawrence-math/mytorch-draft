@@ -11,16 +11,16 @@ class FloatTensor:
 		return getattr(self._base, name)
 
 	@classmethod
-	def zeros_1d(cls, shape: list, dev: Device):
-		return cls(_FloatTensor.zeros_1d(shape, dev))
+	def zeros(cls, shape: list, dev: Device):
+		return cls(_FloatTensor.zeros(shape, dev))
 
 	@classmethod
 	def from_list(cls, vals: list, dev: Device):
 		return cls(_FloatTensor.from_list(vals, dev))
 
 	@classmethod
-	def randn(cls, shape):
-		return cls(_FloatTensor.randn(shape))
+	def randn(cls, shape, dev: Device):
+		return cls(_FloatTensor.randn(shape, dev))
 
 	def __repr__(self):
 		return repr(self._base)
@@ -52,6 +52,9 @@ class FloatTensor:
 
 	def matmul_3d(self, other):
 		return FloatTensor(self._base.matmul_3d(other._base))
+
+	def matmul_tiled(self, other):
+		return FloatTensor(self._base.matmul_tiled(other._base))
 
 	def __add__(self, other):
 		return self.add(other)

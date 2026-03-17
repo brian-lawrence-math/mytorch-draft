@@ -184,6 +184,13 @@ public:
 		return block;
 	}
 
+	static FloatBlock* zeros_gpu(size_t size) {
+		FloatBlock* block = new FloatBlock(size, Device::GPU);
+		CUDA_CHECK(cudaMemset(block->data, 0, size * sizeof(float)));
+		return block;
+
+	}
+
 	static FloatBlock* randn_cpu(size_t size) {
 		std::random_device rd{};
 		std::mt19937 gen{rd()};
@@ -194,6 +201,17 @@ public:
 			float rand_val = d(gen);
 			*(block->data + idx) = rand_val;
 		}
+		return block;
+	}
+
+	static FloatBlock* randn_gpu(size_t size) {
+		FloatBlock* block = new FloatBlock(size, Device::GPU);
+
+		// generate seed on CPU
+		std::random_device rd{};
+		int seed = rd();
+
+		launch_randn(block->data, size, seed);
 		return block;
 	}
 
@@ -240,15 +258,27 @@ FloatTensor::FloatTensor(std::shared_ptr<FloatBlock> block, size_t dim, std::vec
 FloatTensor::FloatTensor(const FloatTensor& other) 
 	: block_(other.block_), dim_(other.dim_), shape_(other.shape_), offset_(other.offset_), strides_(other.strides_) { }
 
-FloatTensor FloatTensor::zeros_1d(size_t size) {
-	FloatBlock* block_raw = FloatBlock::zeros_cpu(size);
+FloatTensor FloatTensor::zeros(std::vector<size_t> shape, Device dev) {
+	FloatBlock* block_raw;
+	switch (dev) {
+	case Device::CPU:
+		block_raw = FloatBlock::zeros_cpu(product(shape));
+		break;
+	case Device::GPU:
+		block_raw = FloatBlock::zeros_gpu(product(shape));
+		break;
+	}
 	std::shared_ptr<FloatBlock> block(block_raw);
 
-	size_t dim = 1;
-	std::vector<size_t> shape{size};
+	size_t dim = shape.size();
 	size_t offset = 0;
-	std::vector<ssize_t> strides{1};
+	std::vector<ssize_t> strides = reverse_cml_prod(shape);
 	return FloatTensor{block, dim, shape, offset, strides};
+}
+
+// Wrapper function for convenience
+FloatTensor FloatTensor::zeros_1d(size_t s) {
+	return FloatTensor::zeros({s}, Device::CPU);
 }
 
 FloatTensor FloatTensor::from_list_1d(std::vector<float> vals, Device dev) {
@@ -274,8 +304,16 @@ FloatTensor FloatTensor::uninitialized(std::vector<size_t> shape, Device dev) {
 	return FloatTensor{block, dim, shape, offset, strides};
 }
 
-FloatTensor FloatTensor::randn(std::vector<size_t> shape) {
-	FloatBlock* block_raw = FloatBlock::randn_cpu(product(shape));
+FloatTensor FloatTensor::randn(std::vector<size_t> shape, Device dev) {
+	FloatBlock* block_raw;
+	switch(dev) {
+	case Device::CPU:
+		block_raw = FloatBlock::randn_cpu(product(shape));
+		break;
+	case Device::GPU:
+		block_raw = FloatBlock::randn_gpu(product(shape));
+		break;
+	}
 	std::shared_ptr<FloatBlock> block(block_raw);
 
 	size_t dim = shape.size();
@@ -625,3 +663,22 @@ FloatTensor FloatTensor::matmul_3d(FloatTensor& other) {
 	}
 }
 
+FloatTensor FloatTensor::matmul_tiled(FloatTensor& other) {
+	if (! this->is_contiguous() && ! other.is_contiguous()) {
+		throw std::invalid_argument("Function matmul_3d() only accepts contiguous tensors.");
+	}
+
+	if(this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
+		std::vector<size_t> result_shape = validate_matmul_shape(other);
+
+		// allocate the memory
+		FloatTensor result = FloatTensor::zeros(result_shape, this->dev_());
+
+		std::cout << "CUDA matmul_tiled kernel" << std::endl;
+		launch_matmul_tiled(this, &other, &result);
+
+		return result;
+	} else {
+		return this->matmul(other);
+	}
+}

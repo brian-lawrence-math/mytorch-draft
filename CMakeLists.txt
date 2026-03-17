@@ -23,6 +23,8 @@ add_executable(bench src/cpp/tensor.cpp src/cpp/kernels.cu tests/cpp/bench_matmu
 
 target_link_libraries(_core PRIVATE CUDA::cudart)
 target_link_libraries(bench PRIVATE CUDA::cudart)
+target_link_libraries(_core PRIVATE CUDA::curand)
+target_link_libraries(bench PRIVATE CUDA::curand)
 
 #/opt/cuda/targets/x86_64-linux
 set_target_properties(_core PROPERTIES POSITION_INDEPENDENT_CODE ON)

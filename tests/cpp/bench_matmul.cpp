@@ -11,8 +11,8 @@
 #include "tensor.h"
 
 void bench_matmul() {
-	FloatTensor t1 = FloatTensor::randn({100, 1000, 1000});
-	FloatTensor t2 = FloatTensor::randn({100, 1000, 1000});
+	FloatTensor t1 = FloatTensor::randn({100, 1000, 1000}, Device::GPU);
+	FloatTensor t2 = FloatTensor::randn({100, 1000, 1000}, Device::GPU);
 
 	t1.move_to_device(Device::GPU);
 	t2.move_to_device(Device::GPU);
@@ -20,7 +20,7 @@ void bench_matmul() {
 	cudaDeviceSynchronize();
 	auto start = std::chrono::steady_clock::now();
 
-	FloatTensor res = t1.matmul_3d(t2);
+	FloatTensor res = t1.matmul_tiled(t2);
 
 	cudaDeviceSynchronize();
 	auto stop = std::chrono::steady_clock::now();
