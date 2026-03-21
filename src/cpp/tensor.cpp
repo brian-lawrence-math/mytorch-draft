@@ -22,6 +22,8 @@ float* alloc_float(size_t n, Device dev) {
 		break;
 	case Device::GPU:
 		p = nullptr;
+		// temp hack to make a little extra space
+		n += (16 - (n % 8));
 		CUDA_CHECK(cudaMalloc(&p, n * sizeof(float)));
 		break;
 	default:

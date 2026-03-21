@@ -10,7 +10,7 @@
 #include "tensor.h"
 
 void bench_matmul() {
-	FloatTensor t1 = FloatTensor::randn({1, 30, 40}, Device::GPU);
+	FloatTensor t1 = FloatTensor::randn({1, 300, 40}, Device::GPU);
 	FloatTensor t2 = FloatTensor::randn({1, 40, 20}, Device::GPU);
 
 	t1.move_to_device(Device::GPU);

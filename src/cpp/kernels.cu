@@ -229,24 +229,29 @@ __global__ void matmul_tiled(ContiguousTensor3d_Device a, ContiguousTensor3d_Dev
 		// a_shared
 		// (note blockDim.z <= TPB_ROW always)
 		__shared__ float a_shared[TPB_ROW * TILE_ROWS][MUL_LOOP_TO_LOAD];
+		static_assert(MUL_LOOP_TO_LOAD % 4 == 0);
 
 		// collaboratively fill up a_shared
-		for (size_t a_shared_idx = thread_idx_flat; a_shared_idx < a_shared_n_entries; a_shared_idx += tot_threads_this_block) {
+		// NOTE: use of float4 here means tensor size must be div by 4
+		// To make this work in general, we will need to allocate extra memory
+		// when we allocate memory for a tensor
+		for (size_t a_shared_idx = 4 * thread_idx_flat; a_shared_idx < a_shared_n_entries; a_shared_idx += 4 * tot_threads_this_block) {
 			size_t a_shared_row = a_shared_idx / MUL_LOOP_TO_LOAD;
 			size_t a_shared_col = a_shared_idx % MUL_LOOP_TO_LOAD;
 			if (a_shared_row_offset + a_shared_row < a.shape[1] && start_loop_idx + a_shared_col < a.shape[2]) {
-				a_shared[a_shared_row][a_shared_col] = a_batch_data[(a_shared_row_offset + a_shared_row) * a.shape[2] + start_loop_idx + a_shared_col];
+				*reinterpret_cast<float4 *>(&a_shared[a_shared_row][4 * a_shared_col]) = *reinterpret_cast<float4 *>(&a_batch_data[(a_shared_row_offset + a_shared_row) * a.shape[2] + start_loop_idx + 4 * a_shared_col]);
 			}
 		}
 
 		// b[batch, start_loop_idx: start_loop_idx + MUL_LOOP_TO_LOAD, start_col: start_col + TILE_ROWS]
 		__shared__ float b_shared[MUL_LOOP_TO_LOAD][TPB_COL * TILE_COLS];
+		static_assert((TPB_COL * TILE_COLS) % 4 == 0);
 
-		for (size_t b_shared_idx = thread_idx_flat; b_shared_idx < b_shared_n_entries; b_shared_idx += tot_threads_this_block) {
+		for (size_t b_shared_idx = 4 * thread_idx_flat; b_shared_idx < b_shared_n_entries; b_shared_idx += 4 * tot_threads_this_block) {
 			size_t b_shared_row = b_shared_idx / (blockDim.y * TILE_COLS);
 			size_t b_shared_col = b_shared_idx % (blockDim.y * TILE_COLS);
 			if (start_loop_idx + b_shared_row < b.shape[1] && b_shared_col_offset + b_shared_col < b.shape[2]) {
-				b_shared[b_shared_row][b_shared_col] = b_batch_data[(start_loop_idx + b_shared_row) * b.shape[2] + b_shared_col_offset + b_shared_col];
+				*reinterpret_cast<float4 *>(&b_shared[b_shared_row][b_shared_col]) = *reinterpret_cast<float4 *>(&b_batch_data[(start_loop_idx + b_shared_row) * b.shape[2] + b_shared_col_offset + b_shared_col]);
 			}
 		}
 
@@ -412,5 +417,6 @@ __host__ void launch_matmul_tiled(FloatTensor* a, FloatTensor* b, FloatTensor* r
 	
 	matmul_tiled<<<blocks, threads>>>(a_device, b_device, res_device);
 	CUDA_CHECK(cudaGetLastError());
+	CUDA_CHECK(cudaDeviceSynchronize());
 }
 
