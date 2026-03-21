@@ -33,6 +33,10 @@ target_compile_options(debug PRIVATE
     -g $<$<COMPILE_LANGUAGE:CUDA>:-G>
 )
 
+target_compile_options(bench PRIVATE
+	$<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
+)
+
 #/opt/cuda/targets/x86_64-linux
 set_target_properties(_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(_core PROPERTIES CUDA_SEPARABLE_COMPILATION ON)

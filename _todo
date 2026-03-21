@@ -13,7 +13,11 @@ PRIORITIES in time order:
 
 - DONE begin optimization
 
-- keep a readme log and maybe git commits for optimization
+- DONE keep a readme log and maybe git commits for optimization
+
+- more profiling and optimization
+
+- more features
 
 OTHER TODOS:
 
@@ -40,7 +44,7 @@ OTHER TODOS:
 	- range
 	- DONE random
 	- fix random so it's ok if odd num of values
-	- sum along axis
+	- sum along axis, sum overall
 	- scalar mul / div
 
 NOTES:

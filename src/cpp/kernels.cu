@@ -21,8 +21,8 @@
 
 #define TPB_ROW (32)
 #define TPB_COL (32)
-#define TILE_ROWS (8)
-#define TILE_COLS (8)
+#define TILE_ROWS (4)
+#define TILE_COLS (4)
 
 // make sure blockDim.z is a multiple of warp size
 static_assert((TPB_ROW % 32 == 0));
@@ -30,7 +30,7 @@ static_assert((TPB_ROW % 32 == 0));
 // Multiplication tensor(a, b) @ tensor(b, c) 
 // means a "multiplication loop" over the intermediate dimension of size b.
 // How many of those b entries to load into shared memory at once?
-#define MUL_LOOP_TO_LOAD (24)
+#define MUL_LOOP_TO_LOAD (48)
 
 // make sure shared memory won't overflow
 #define MAX_SHARED_FLOATS_PER_BLOCK (12288)
@@ -199,6 +199,7 @@ __global__ void matmul_3d(ContiguousTensor3d_Device a, ContiguousTensor3d_Device
 	}
 }
 
+
 __global__ void matmul_tiled(ContiguousTensor3d_Device a, ContiguousTensor3d_Device b, ContiguousTensor3d_Device res) {
 	// blocks: (batch, row, col)
 	// threads: (1, row, col)
@@ -268,6 +269,7 @@ __global__ void matmul_tiled(ContiguousTensor3d_Device a, ContiguousTensor3d_Dev
 				res_batch_data[(a_shared_row_offset + row) * res.shape[2] + (b_shared_col_offset + col)] += cml_sum;
 			}
 		}
+
 	}
 }
 

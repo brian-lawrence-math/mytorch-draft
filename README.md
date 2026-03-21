@@ -211,6 +211,10 @@ Then I arrange for all the threads in the block to handle consecutive floats, on
 Anyway, this gives me a substantial speedup: the benchmark is down to 340ms.
 
 
+# More optimizations
+
+At this point I came across this terrific [blog post](https://www.aleksagordic.com/blog/matmul)
+by Aleksa Gordic.
 
 
 
