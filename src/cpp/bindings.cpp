@@ -34,6 +34,7 @@ PYBIND11_MODULE(_core, mytorch, py::mod_gil_not_used()) {
 		.def_property_readonly("device", &FloatTensor::dev_)
 		.def("clone", &FloatTensor::clone)
 		.def("move_to_device", &FloatTensor::move_to_device)
+		.def("__eq__", &FloatTensor::is_eq)
 		.def("add", &FloatTensor::add)
 		.def("sub", &FloatTensor::sub)
 		.def("mul", &FloatTensor::mul)

@@ -214,7 +214,7 @@ Anyway, this gives me a substantial speedup: the benchmark is down to 340ms.
 # More optimizations
 
 At this point I came across this terrific [blog post](https://www.aleksagordic.com/blog/matmul)
-by Aleksa Gordic.
+by Aleksa Gordic, which inspired me to try some further optimizations:
 
-
+- Vectorize reads from global into shared memory, using reinterpret_cast<float4 *> --> 310 ms.
 

@@ -68,7 +68,26 @@ __global__ void add_contiguous(float* a, float* b, float* res, size_t len) {
 }
 
 // ======================= Basic tensor arithmetic kernels =============================
-__global__ void add(float* tensor_a, float* tensor_b, float* tensor_res, size_t* shape, ssize_t* a_strides, size_t a_offset, ssize_t* b_strides, ssize_t  b_offset, size_t dim) {
+__global__ void is_eq(float* tensor_a, float* tensor_b, size_t* shape, ssize_t* a_strides, size_t a_offset, ssize_t* b_strides, ssize_t b_offset, size_t dim, int* result) {
+	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+	size_t num_entries = product_device(shape, dim);
+
+	if (idx < num_entries) {
+		size_t a_idx = flat_idx_to_raw_idx_device(idx, shape, a_strides, a_offset, dim);
+		size_t b_idx = flat_idx_to_raw_idx_device(idx, shape, b_strides, b_offset, dim);
+
+		float a_val = tensor_a[a_idx];
+		float b_val = tensor_b[b_idx];
+		
+		if (a_val != b_val) {
+			atomicCAS(result, 1, 0);
+		}
+	}
+	return;
+}
+
+__global__ void add(float* tensor_a, float* tensor_b, float* tensor_res, size_t* shape, ssize_t* a_strides, size_t a_offset, ssize_t* b_strides, size_t  b_offset, size_t dim) {
 	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
 	size_t num_entries = product_device(shape, dim);
@@ -83,7 +102,7 @@ __global__ void add(float* tensor_a, float* tensor_b, float* tensor_res, size_t*
 	return;
 }
 
-__global__ void sub(float* tensor_a, float* tensor_b, float* tensor_res, size_t* shape, ssize_t* a_strides, size_t a_offset, ssize_t* b_strides, ssize_t  b_offset, size_t dim) {
+__global__ void sub(float* tensor_a, float* tensor_b, float* tensor_res, size_t* shape, ssize_t* a_strides, size_t a_offset, ssize_t* b_strides, size_t  b_offset, size_t dim) {
 	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
 	size_t num_entries = product_device(shape, dim);
@@ -98,7 +117,7 @@ __global__ void sub(float* tensor_a, float* tensor_b, float* tensor_res, size_t*
 	return;
 }
 
-__global__ void mul(float* tensor_a, float* tensor_b, float* tensor_res, size_t* shape, ssize_t* a_strides, size_t a_offset, ssize_t* b_strides, ssize_t  b_offset, size_t dim) {
+__global__ void mul(float* tensor_a, float* tensor_b, float* tensor_res, size_t* shape, ssize_t* a_strides, size_t a_offset, ssize_t* b_strides, size_t  b_offset, size_t dim) {
 	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
 	size_t num_entries = product_device(shape, dim);
@@ -298,6 +317,32 @@ __host__ void launch_add_contiguous(float* a, float* b, float* res, size_t len) 
 	}
 	return;
 }
+
+__host__ int launch_is_eq(FloatTensor* a, FloatTensor* b) {
+	int res_h = 1;
+	int* res_d;
+	CUDA_CHECK(cudaMalloc(&res_d, sizeof(int)));
+	CUDA_CHECK(cudaMemcpy(res_d, &res_h, sizeof(int), cudaMemcpyHostToDevice));
+
+	size_t num_entries = a->numel();
+	size_t n_blocks, threads_per_block;
+	if (num_entries < TARGET_THREADS_PER_BLOCK) {
+		n_blocks = 1;
+		threads_per_block = num_entries;
+	} else {
+		n_blocks = (num_entries + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
+		threads_per_block = TARGET_THREADS_PER_BLOCK;
+	}
+	is_eq<<<n_blocks, threads_per_block>>>(a->data_ptr(), b->data_ptr(), a->shape_.data(), a->strides_.data(), a->offset_, b->strides_.data(), b->offset_, a->dim_, res_d);
+
+	CUDA_CHECK(cudaGetLastError());
+	CUDA_CHECK(cudaDeviceSynchronize());
+	
+	CUDA_CHECK(cudaMemcpy(&res_h, res_d, sizeof(int), cudaMemcpyDeviceToHost));
+	return res_h;
+}
+
+
 
 __host__ void launch_add(FloatTensor* a, FloatTensor* b, FloatTensor* res) {
 	size_t num_entries = a->numel();

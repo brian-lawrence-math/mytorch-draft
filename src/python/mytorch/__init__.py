@@ -22,6 +22,9 @@ class FloatTensor:
 	def randn(cls, shape, dev: Device):
 		return cls(_FloatTensor.randn(shape, dev))
 
+	def __eq__(self, other):
+		return self._base.__eq__(other._base)
+
 	def __repr__(self):
 		return repr(self._base)
 

@@ -55,6 +55,7 @@ struct FloatTensor {
 
 	void validate_same_shape(const FloatTensor& other);
 	std::vector<size_t> validate_matmul_shape(const FloatTensor& other);
+	bool is_eq(FloatTensor& other);
 	FloatTensor add(FloatTensor& other);
 	FloatTensor sub(FloatTensor& other);
 	FloatTensor mul(FloatTensor& other);

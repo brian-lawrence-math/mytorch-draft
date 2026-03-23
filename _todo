@@ -30,7 +30,6 @@ OTHER TODOS:
 - CUDA synchronize command, make it available to python
 - CUDA, improve error checking
 - Python pretty print
-- Python assignment 'x2 = x1' should create new object with same data
 - Python implement __eq__
 - Python: tests:
   - matmul and other ops, same result on CPU and GPU

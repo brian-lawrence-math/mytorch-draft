@@ -533,6 +533,25 @@ std::vector<size_t> FloatTensor::validate_matmul_shape(const FloatTensor& other)
 	return result;
 }
 
+bool FloatTensor::is_eq(FloatTensor& other) {
+	if (this->shape_ != other.shape_) {
+		return false;
+	}
+
+	if(this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
+		int result_int = launch_is_eq(this, &other);
+		return (result_int != 0);
+	} else {
+		for (size_t i = 0; i < this->numel(); i++) {
+			LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
+			if (this->get_idx(log_idx) != other.get_idx(log_idx)) {
+				return false;
+			}
+		}
+		return true;
+	}
+}
+
 FloatTensor FloatTensor::add(FloatTensor& other) {
 	validate_same_shape(other);
 
