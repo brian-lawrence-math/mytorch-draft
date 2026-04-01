@@ -42,6 +42,10 @@ set_target_properties(_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(_core PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 set_target_properties(_core PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/src/python/mytorch)
 
+set_target_properties(_core PROPERTIES CUDA_ARCHITECTURES 86)
+set_target_properties(bench PROPERTIES CUDA_ARCHITECTURES 86)
+set_target_properties(debug PROPERTIES CUDA_ARCHITECTURES 86)
+
 target_include_directories(bench PRIVATE src/cpp)
 target_include_directories(debug PRIVATE src/cpp)
 

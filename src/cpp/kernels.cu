@@ -1,13 +1,13 @@
+#include <cstdio>
 #include <iostream>
 #include <stdexcept>
-#include <cstdio>
 #include <vector>
 
+#include "cublas_v2.h"
 #include <curand.h>
 
-#include "tensor.h"
 #include "cuda_utils.h"
-
+#include "tensor.h"
 
 // Hard-coded constant specific to the RTX 3050
 #define MAX_THREADS_PER_BLOCK (1024)
@@ -27,441 +27,551 @@
 // make sure blockDim.z is a multiple of warp size
 static_assert((TPB_ROW % 32 == 0));
 
-// Multiplication tensor(a, b) @ tensor(b, c) 
+// Multiplication tensor(a, b) @ tensor(b, c)
 // means a "multiplication loop" over the intermediate dimension of size b.
 // How many of those b entries to load into shared memory at once?
 #define MUL_LOOP_TO_LOAD (48)
 
 // make sure shared memory won't overflow
 #define MAX_SHARED_FLOATS_PER_BLOCK (12288)
-static_assert((TPB_ROW * TILE_ROWS + TPB_COL * TILE_COLS) * MUL_LOOP_TO_LOAD <= MAX_SHARED_FLOATS_PER_BLOCK);
+static_assert((TPB_ROW * TILE_ROWS + TPB_COL * TILE_COLS) * MUL_LOOP_TO_LOAD <=
+              MAX_SHARED_FLOATS_PER_BLOCK);
 
 // ========================== Helper methods for indexing =====================
 // Modified from tensor.cpp to run on device (i.e. no vectors)
-__device__ size_t product_device(size_t* vals, size_t n) {
-	size_t cml_prod = 1;
-	for(size_t i = 0; i < n; i++) {
-		cml_prod *= vals[i];
-	}
-	return cml_prod;
+__device__ size_t product_device(size_t *vals, size_t n) {
+  size_t cml_prod = 1;
+  for (size_t i = 0; i < n; i++) {
+    cml_prod *= vals[i];
+  }
+  return cml_prod;
 }
 
 // shape is an array size_t[dim]
 // strides is another array size_t[dim] of the same size
-__device__ size_t flat_idx_to_raw_idx_device(size_t flat_idx, size_t* shape, ssize_t* strides, size_t offset, size_t dim) {
-	ssize_t result = offset;
-	for(size_t d = dim; d-- > 0; ) {
-		result += (flat_idx % shape[d]) * strides[d];
-		flat_idx /= shape[d];
-	}
-	return (size_t)result;
+__device__ size_t flat_idx_to_raw_idx_device(size_t flat_idx, size_t *shape,
+                                             ssize_t *strides, size_t offset,
+                                             size_t dim) {
+  ssize_t result = offset;
+  for (size_t d = dim; d-- > 0;) {
+    result += (flat_idx % shape[d]) * strides[d];
+    flat_idx /= shape[d];
+  }
+  return (size_t)result;
 }
 
 // =================== Special-case kernels for contiguous tensors ==========
-__global__ void add_contiguous(float* a, float* b, float* res, size_t len) {
-	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void add_contiguous(float *a, float *b, float *res, size_t len) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-	if (idx < len) {
-		res[idx] = a[idx] + b[idx];
-	}
-	return;
+  if (idx < len) {
+    res[idx] = a[idx] + b[idx];
+  }
+  return;
 }
 
-// ======================= Basic tensor arithmetic kernels =============================
-__global__ void is_eq(float* tensor_a, float* tensor_b, size_t* shape, ssize_t* a_strides, size_t a_offset, ssize_t* b_strides, ssize_t b_offset, size_t dim, int* result) {
-	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+// ======================= Basic tensor arithmetic kernels
+// =============================
+__global__ void is_eq(float *tensor_a, float *tensor_b, size_t *shape,
+                      ssize_t *a_strides, size_t a_offset, ssize_t *b_strides,
+                      ssize_t b_offset, size_t dim, int *result) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-	size_t num_entries = product_device(shape, dim);
+  size_t num_entries = product_device(shape, dim);
 
-	if (idx < num_entries) {
-		size_t a_idx = flat_idx_to_raw_idx_device(idx, shape, a_strides, a_offset, dim);
-		size_t b_idx = flat_idx_to_raw_idx_device(idx, shape, b_strides, b_offset, dim);
+  if (idx < num_entries) {
+    size_t a_idx =
+        flat_idx_to_raw_idx_device(idx, shape, a_strides, a_offset, dim);
+    size_t b_idx =
+        flat_idx_to_raw_idx_device(idx, shape, b_strides, b_offset, dim);
 
-		float a_val = tensor_a[a_idx];
-		float b_val = tensor_b[b_idx];
-		
-		if (a_val != b_val) {
-			atomicCAS(result, 1, 0);
-		}
-	}
-	return;
+    float a_val = tensor_a[a_idx];
+    float b_val = tensor_b[b_idx];
+
+    if (a_val != b_val) {
+      atomicCAS(result, 1, 0);
+    }
+  }
+  return;
 }
 
-__global__ void add(float* tensor_a, float* tensor_b, float* tensor_res, size_t* shape, ssize_t* a_strides, size_t a_offset, ssize_t* b_strides, size_t  b_offset, size_t dim) {
-	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void add(float *tensor_a, float *tensor_b, float *tensor_res,
+                    size_t *shape, ssize_t *a_strides, size_t a_offset,
+                    ssize_t *b_strides, size_t b_offset, size_t dim) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-	size_t num_entries = product_device(shape, dim);
+  size_t num_entries = product_device(shape, dim);
 
-	if (idx < num_entries) {
-		size_t a_idx = flat_idx_to_raw_idx_device(idx, shape, a_strides, a_offset, dim);
-		size_t b_idx = flat_idx_to_raw_idx_device(idx, shape, b_strides, b_offset, dim);
+  if (idx < num_entries) {
+    size_t a_idx =
+        flat_idx_to_raw_idx_device(idx, shape, a_strides, a_offset, dim);
+    size_t b_idx =
+        flat_idx_to_raw_idx_device(idx, shape, b_strides, b_offset, dim);
 
-		float val = tensor_a[a_idx] + tensor_b[b_idx];
-		tensor_res[idx] = val;
-	}
-	return;
+    float val = tensor_a[a_idx] + tensor_b[b_idx];
+    tensor_res[idx] = val;
+  }
+  return;
 }
 
-__global__ void sub(float* tensor_a, float* tensor_b, float* tensor_res, size_t* shape, ssize_t* a_strides, size_t a_offset, ssize_t* b_strides, size_t  b_offset, size_t dim) {
-	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void sub(float *tensor_a, float *tensor_b, float *tensor_res,
+                    size_t *shape, ssize_t *a_strides, size_t a_offset,
+                    ssize_t *b_strides, size_t b_offset, size_t dim) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-	size_t num_entries = product_device(shape, dim);
+  size_t num_entries = product_device(shape, dim);
 
-	if (idx < num_entries) {
-		size_t a_idx = flat_idx_to_raw_idx_device(idx, shape, a_strides, a_offset, dim);
-		size_t b_idx = flat_idx_to_raw_idx_device(idx, shape, b_strides, b_offset, dim);
+  if (idx < num_entries) {
+    size_t a_idx =
+        flat_idx_to_raw_idx_device(idx, shape, a_strides, a_offset, dim);
+    size_t b_idx =
+        flat_idx_to_raw_idx_device(idx, shape, b_strides, b_offset, dim);
 
-		float val = tensor_a[a_idx] - tensor_b[b_idx];
-		tensor_res[idx] = val;
-	}
-	return;
+    float val = tensor_a[a_idx] - tensor_b[b_idx];
+    tensor_res[idx] = val;
+  }
+  return;
 }
 
-__global__ void mul(float* tensor_a, float* tensor_b, float* tensor_res, size_t* shape, ssize_t* a_strides, size_t a_offset, ssize_t* b_strides, size_t  b_offset, size_t dim) {
-	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void mul(float *tensor_a, float *tensor_b, float *tensor_res,
+                    size_t *shape, ssize_t *a_strides, size_t a_offset,
+                    ssize_t *b_strides, size_t b_offset, size_t dim) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-	size_t num_entries = product_device(shape, dim);
+  size_t num_entries = product_device(shape, dim);
 
-	if (idx < num_entries) {
-		size_t a_idx = flat_idx_to_raw_idx_device(idx, shape, a_strides, a_offset, dim);
-		size_t b_idx = flat_idx_to_raw_idx_device(idx, shape, b_strides, b_offset, dim);
+  if (idx < num_entries) {
+    size_t a_idx =
+        flat_idx_to_raw_idx_device(idx, shape, a_strides, a_offset, dim);
+    size_t b_idx =
+        flat_idx_to_raw_idx_device(idx, shape, b_strides, b_offset, dim);
 
-		float val = tensor_a[a_idx] * tensor_b[b_idx];
-		tensor_res[idx] = val;
-	}
-	return;
+    float val = tensor_a[a_idx] * tensor_b[b_idx];
+    tensor_res[idx] = val;
+  }
+  return;
 }
 
-__global__ void matmul(float* tensor_a, float* tensor_b, float* tensor_res, size_t* a_shape, ssize_t* a_strides, size_t a_offset, size_t* b_shape, ssize_t* b_strides, size_t b_offset, size_t dim) {
-	size_t flat_thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void matmul(float *tensor_a, float *tensor_b, float *tensor_res,
+                       size_t *a_shape, ssize_t *a_strides, size_t a_offset,
+                       size_t *b_shape, ssize_t *b_strides, size_t b_offset,
+                       size_t dim) {
+  size_t flat_thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-	size_t num_entries = product_device(a_shape, dim-2) * a_shape[dim - 2] * b_shape[dim - 1];
+  size_t num_entries =
+      product_device(a_shape, dim - 2) * a_shape[dim - 2] * b_shape[dim - 1];
 
-	if (flat_thread_idx < num_entries) {
-		// Compute a_idx and b_idx for the 0th step of the matmul
-		size_t a_idx = a_offset;
-		size_t b_idx = b_offset;
+  if (flat_thread_idx < num_entries) {
+    // Compute a_idx and b_idx for the 0th step of the matmul
+    size_t a_idx = a_offset;
+    size_t b_idx = b_offset;
 
-		// save this value for later
-		size_t res_idx = flat_thread_idx;
+    // save this value for later
+    size_t res_idx = flat_thread_idx;
 
-		// Process the last two dimensions manually
-		size_t last_idx = flat_thread_idx % b_shape[dim - 1];
-		b_idx += last_idx * b_strides[dim - 1];
+    // Process the last two dimensions manually
+    size_t last_idx = flat_thread_idx % b_shape[dim - 1];
+    b_idx += last_idx * b_strides[dim - 1];
 
-		flat_thread_idx /= b_shape[dim - 1];
-		size_t next_to_last_idx = flat_thread_idx % a_shape[dim - 2];
-		a_idx += next_to_last_idx * a_strides[dim - 2];
+    flat_thread_idx /= b_shape[dim - 1];
+    size_t next_to_last_idx = flat_thread_idx % a_shape[dim - 2];
+    a_idx += next_to_last_idx * a_strides[dim - 2];
 
-		// The remaining indices are batch indices, just loop through them
-		for (size_t d = dim - 2; d-- > 0; ) {
-			flat_thread_idx /= a_shape[d + 1];
-			size_t curr_d_idx = flat_thread_idx % a_shape[d];
-			a_idx += curr_d_idx * a_strides[d];
-			b_idx += curr_d_idx * b_strides[d];
-		}
+    // The remaining indices are batch indices, just loop through them
+    for (size_t d = dim - 2; d-- > 0;) {
+      flat_thread_idx /= a_shape[d + 1];
+      size_t curr_d_idx = flat_thread_idx % a_shape[d];
+      a_idx += curr_d_idx * a_strides[d];
+      b_idx += curr_d_idx * b_strides[d];
+    }
 
-		// Now a_idx, b_idx store the first indices to be multiplied.
-		// The others will be computed by adding a_step and b_step.
-		size_t a_step = a_strides[dim - 1];
-		size_t b_step = b_strides[dim - 2];
+    // Now a_idx, b_idx store the first indices to be multiplied.
+    // The others will be computed by adding a_step and b_step.
+    size_t a_step = a_strides[dim - 1];
+    size_t b_step = b_strides[dim - 2];
 
-		// Finally ready for the multiplication loop
-		float result = 0;
-		for (size_t loop_idx = 0; loop_idx < a_shape[dim - 1]; loop_idx++) {
-			result += tensor_a[a_idx] * tensor_b[b_idx];
-			a_idx += a_step;
-			b_idx += b_step;
-		}
+    // Finally ready for the multiplication loop
+    float result = 0;
+    for (size_t loop_idx = 0; loop_idx < a_shape[dim - 1]; loop_idx++) {
+      result += tensor_a[a_idx] * tensor_b[b_idx];
+      a_idx += a_step;
+      b_idx += b_step;
+    }
 
-		tensor_res[res_idx] = result;
-	}
+    tensor_res[res_idx] = result;
+  }
 }
 
 struct ContiguousTensor3d_Device {
-	float* data; size_t shape[3];
+  float *data;
+  size_t shape[3];
 };
 
 // special-case function: batched matmul for contiguous 3d tensors
-__global__ void matmul_3d(ContiguousTensor3d_Device a, ContiguousTensor3d_Device b, ContiguousTensor3d_Device res) {
-	size_t flat_thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void matmul_3d(ContiguousTensor3d_Device a,
+                          ContiguousTensor3d_Device b,
+                          ContiguousTensor3d_Device res) {
+  size_t flat_thread_idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-	size_t num_entries = res.shape[0] * res.shape[1] * res.shape[2];
+  size_t num_entries = res.shape[0] * res.shape[1] * res.shape[2];
 
-	if (flat_thread_idx < num_entries) {
-		// save a copy for the final assignment
-		size_t res_idx = flat_thread_idx;
-		
-		// convert flat_thread_idx to idx into res
-		size_t z_idx = flat_thread_idx % res.shape[2];
-		flat_thread_idx /= res.shape[2];
-		size_t y_idx = flat_thread_idx % res.shape[1];
-		flat_thread_idx /= res.shape[1];
-		size_t x_idx = flat_thread_idx;
+  if (flat_thread_idx < num_entries) {
+    // save a copy for the final assignment
+    size_t res_idx = flat_thread_idx;
 
-		// now the multiplication loop
-		// precompute starting idxs and step sizes for a and b
-		size_t a_idx = x_idx * a.shape[1] * a.shape[2] + y_idx * a.shape[2];
-		size_t b_idx = x_idx * b.shape[1] * b.shape[2] + z_idx;
-		size_t a_step = 1;
-		size_t b_step = b.shape[2];
+    // convert flat_thread_idx to idx into res
+    size_t z_idx = flat_thread_idx % res.shape[2];
+    flat_thread_idx /= res.shape[2];
+    size_t y_idx = flat_thread_idx % res.shape[1];
+    flat_thread_idx /= res.shape[1];
+    size_t x_idx = flat_thread_idx;
 
-		float result = 0;
+    // now the multiplication loop
+    // precompute starting idxs and step sizes for a and b
+    size_t a_idx = x_idx * a.shape[1] * a.shape[2] + y_idx * a.shape[2];
+    size_t b_idx = x_idx * b.shape[1] * b.shape[2] + z_idx;
+    size_t a_step = 1;
+    size_t b_step = b.shape[2];
 
-		for (size_t loop_idx = 0; loop_idx < a.shape[2]; loop_idx ++) {
-			result += a.data[a_idx] * b.data[b_idx];
-			a_idx += a_step;
-			b_idx += b_step;
-		}
+    float result = 0;
 
-		res.data[res_idx] = result;
-	}
+    for (size_t loop_idx = 0; loop_idx < a.shape[2]; loop_idx++) {
+      result += a.data[a_idx] * b.data[b_idx];
+      a_idx += a_step;
+      b_idx += b_step;
+    }
+
+    res.data[res_idx] = result;
+  }
 }
 
+__global__ void matmul_tiled(ContiguousTensor3d_Device a,
+                             ContiguousTensor3d_Device b,
+                             ContiguousTensor3d_Device res) {
+  // blocks: (batch, row, col)
+  // threads: (1, row, col)
 
-__global__ void matmul_tiled(ContiguousTensor3d_Device a, ContiguousTensor3d_Device b, ContiguousTensor3d_Device res) {
-	// blocks: (batch, row, col)
-	// threads: (1, row, col)
-	
-	// compute batch
-	size_t batch = blockIdx.x;
-	float* a_batch_data = a.data + batch * a.shape[1] * a.shape[2];
-	float* b_batch_data = b.data + batch * b.shape[1] * b.shape[2];
-	float* res_batch_data = res.data + batch * res.shape[1] * res.shape[2];
+  // compute batch
+  size_t batch = blockIdx.x;
+  float *a_batch_data = a.data + batch * a.shape[1] * a.shape[2];
+  float *b_batch_data = b.data + batch * b.shape[1] * b.shape[2];
+  float *res_batch_data = res.data + batch * res.shape[1] * res.shape[2];
 
-	// which entries is this thread responsible for?
-	size_t thread_idx_flat = threadIdx.y + blockDim.y * threadIdx.z;
-	size_t tot_threads_this_block = blockDim.y * blockDim.z;
+  // which entries is this thread responsible for?
+  size_t thread_idx_flat = threadIdx.y + blockDim.y * threadIdx.z;
+  size_t tot_threads_this_block = blockDim.y * blockDim.z;
 
-	size_t a_shared_n_entries = blockDim.z * TILE_ROWS * MUL_LOOP_TO_LOAD;
-	size_t b_shared_n_entries = MUL_LOOP_TO_LOAD * blockDim.y * TILE_COLS;
+  size_t a_shared_n_entries = blockDim.z * TILE_ROWS * MUL_LOOP_TO_LOAD;
+  size_t b_shared_n_entries = MUL_LOOP_TO_LOAD * blockDim.y * TILE_COLS;
 
-	size_t a_shared_row_offset = blockIdx.z * blockDim.z * TILE_ROWS;
-	size_t b_shared_col_offset = blockIdx.y * blockDim.y * TILE_COLS;
+  size_t a_shared_row_offset = blockIdx.z * blockDim.z * TILE_ROWS;
+  size_t b_shared_col_offset = blockIdx.y * blockDim.y * TILE_COLS;
 
-	for (size_t start_loop_idx = 0; start_loop_idx < a.shape[2]; start_loop_idx += MUL_LOOP_TO_LOAD) {
-		__syncthreads();
+  for (size_t start_loop_idx = 0; start_loop_idx < a.shape[2];
+       start_loop_idx += MUL_LOOP_TO_LOAD) {
+    __syncthreads();
 
-		// collaboratively load (1, blockDim.z * TILE_ROWS, MUL_LOOP) values starting from
-		// a[batch, blockIdx.z * blockDim.z * TILE_ROWS, start_loop_idx]
-		// into
-		// a_shared
-		// (note blockDim.z <= TPB_ROW always)
-		__shared__ float a_shared[TPB_ROW * TILE_ROWS][MUL_LOOP_TO_LOAD];
-		static_assert(MUL_LOOP_TO_LOAD % 4 == 0);
+    // collaboratively load (1, blockDim.z * TILE_ROWS, MUL_LOOP) values
+    // starting from a[batch, blockIdx.z * blockDim.z * TILE_ROWS,
+    // start_loop_idx] into a_shared (note blockDim.z <= TPB_ROW always)
+    __shared__ float a_shared[TPB_ROW * TILE_ROWS][MUL_LOOP_TO_LOAD];
+    static_assert(MUL_LOOP_TO_LOAD % 4 == 0);
 
-		// collaboratively fill up a_shared
-		// NOTE: use of float4 here means tensor size must be div by 4
-		// To make this work in general, we will need to allocate extra memory
-		// when we allocate memory for a tensor
-		for (size_t a_shared_idx = 4 * thread_idx_flat; a_shared_idx < a_shared_n_entries; a_shared_idx += 4 * tot_threads_this_block) {
-			size_t a_shared_row = a_shared_idx / MUL_LOOP_TO_LOAD;
-			size_t a_shared_col = a_shared_idx % MUL_LOOP_TO_LOAD;
-			if (a_shared_row_offset + a_shared_row < a.shape[1] && start_loop_idx + a_shared_col < a.shape[2]) {
-				*reinterpret_cast<float4 *>(&a_shared[a_shared_row][4 * a_shared_col]) = *reinterpret_cast<float4 *>(&a_batch_data[(a_shared_row_offset + a_shared_row) * a.shape[2] + start_loop_idx + 4 * a_shared_col]);
-			}
-		}
+    // collaboratively fill up a_shared
+    // NOTE: use of float4 here means tensor size must be div by 4
+    // To make this work in general, we will need to allocate extra memory
+    // when we allocate memory for a tensor
+    for (size_t a_shared_idx = 4 * thread_idx_flat;
+         a_shared_idx < a_shared_n_entries;
+         a_shared_idx += 4 * tot_threads_this_block) {
+      size_t a_shared_row = a_shared_idx / MUL_LOOP_TO_LOAD;
+      size_t a_shared_col = a_shared_idx % MUL_LOOP_TO_LOAD;
+      if (a_shared_row_offset + a_shared_row < a.shape[1] &&
+          start_loop_idx + a_shared_col < a.shape[2]) {
+        *reinterpret_cast<float4 *>(&a_shared[a_shared_row][4 * a_shared_col]) =
+            *reinterpret_cast<float4 *>(
+                &a_batch_data[(a_shared_row_offset + a_shared_row) *
+                                  a.shape[2] +
+                              start_loop_idx + 4 * a_shared_col]);
+      }
+    }
 
-		// b[batch, start_loop_idx: start_loop_idx + MUL_LOOP_TO_LOAD, start_col: start_col + TILE_ROWS]
-		__shared__ float b_shared[MUL_LOOP_TO_LOAD][TPB_COL * TILE_COLS];
-		static_assert((TPB_COL * TILE_COLS) % 4 == 0);
+    // b[batch, start_loop_idx: start_loop_idx + MUL_LOOP_TO_LOAD, start_col:
+    // start_col + TILE_ROWS]
+    __shared__ float b_shared[MUL_LOOP_TO_LOAD][TPB_COL * TILE_COLS];
+    static_assert((TPB_COL * TILE_COLS) % 4 == 0);
 
-		for (size_t b_shared_idx = 4 * thread_idx_flat; b_shared_idx < b_shared_n_entries; b_shared_idx += 4 * tot_threads_this_block) {
-			size_t b_shared_row = b_shared_idx / (blockDim.y * TILE_COLS);
-			size_t b_shared_col = b_shared_idx % (blockDim.y * TILE_COLS);
-			if (start_loop_idx + b_shared_row < b.shape[1] && b_shared_col_offset + b_shared_col < b.shape[2]) {
-				*reinterpret_cast<float4 *>(&b_shared[b_shared_row][b_shared_col]) = *reinterpret_cast<float4 *>(&b_batch_data[(start_loop_idx + b_shared_row) * b.shape[2] + b_shared_col_offset + b_shared_col]);
-			}
-		}
+    for (size_t b_shared_idx = 4 * thread_idx_flat;
+         b_shared_idx < b_shared_n_entries;
+         b_shared_idx += 4 * tot_threads_this_block) {
+      size_t b_shared_row = b_shared_idx / (blockDim.y * TILE_COLS);
+      size_t b_shared_col = b_shared_idx % (blockDim.y * TILE_COLS);
+      if (start_loop_idx + b_shared_row < b.shape[1] &&
+          b_shared_col_offset + b_shared_col < b.shape[2]) {
+        *reinterpret_cast<float4 *>(&b_shared[b_shared_row][b_shared_col]) =
+            *reinterpret_cast<float4 *>(
+                &b_batch_data[(start_loop_idx + b_shared_row) * b.shape[2] +
+                              b_shared_col_offset + b_shared_col]);
+      }
+    }
 
-		__syncthreads();
-		// now that everything has been loaded into a_shared and b_shared,
-		// we can do some computation
+    __syncthreads();
+    // now that everything has been loaded into a_shared and b_shared,
+    // we can do some computation
 
-		for (size_t row = threadIdx.z; row < blockDim.z * TILE_ROWS && a_shared_row_offset + row < a.shape[1]; row += blockDim.z) {
-			for (size_t col = threadIdx.y; col < blockDim.y * TILE_COLS && b_shared_col_offset + col < b.shape[2]; col += blockDim.y) {
-				// am I doing too much computation in this loop?
-				float cml_sum = 0.0;
+    for (size_t row = threadIdx.z;
+         row < blockDim.z * TILE_ROWS && a_shared_row_offset + row < a.shape[1];
+         row += blockDim.z) {
+      for (size_t col = threadIdx.y; col < blockDim.y * TILE_COLS &&
+                                     b_shared_col_offset + col < b.shape[2];
+           col += blockDim.y) {
+        // am I doing too much computation in this loop?
+        float cml_sum = 0.0;
 
-				for (size_t loop_idx = 0; loop_idx < MUL_LOOP_TO_LOAD && start_loop_idx + loop_idx < a.shape[2]; loop_idx++) {
-					cml_sum += a_shared[row][loop_idx] * b_shared[loop_idx][col];
-				}
-			
-				// make the update
-				// don't worry about synchronization or atomic add because
-				// I'm the only thread touching this entry of res
-				res_batch_data[(a_shared_row_offset + row) * res.shape[2] + (b_shared_col_offset + col)] += cml_sum;
-			}
-		}
+        for (size_t loop_idx = 0; loop_idx < MUL_LOOP_TO_LOAD &&
+                                  start_loop_idx + loop_idx < a.shape[2];
+             loop_idx++) {
+          cml_sum += a_shared[row][loop_idx] * b_shared[loop_idx][col];
+        }
 
-	}
+        // make the update
+        // don't worry about synchronization or atomic add because
+        // I'm the only thread touching this entry of res
+        res_batch_data[(a_shared_row_offset + row) * res.shape[2] +
+                       (b_shared_col_offset + col)] += cml_sum;
+      }
+    }
+  }
 }
 
-// ============================= Launchers ======================================
-__host__ void launch_randn(float* a, size_t len, int seed) {
-	curandGenerator_t gen;
+// ============================= Launchers
+// ======================================
+__host__ void launch_randn(float *a, size_t len, int seed) {
+  curandGenerator_t gen;
 
-	CURAND_CALL(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT));
-	CURAND_CALL(curandSetPseudoRandomGeneratorSeed(gen, seed));
-	CURAND_CALL(curandGenerateNormal(gen, a, len, 0.0, 1.0));
+  CURAND_CALL(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT));
+  CURAND_CALL(curandSetPseudoRandomGeneratorSeed(gen, seed));
+  CURAND_CALL(curandGenerateNormal(gen, a, len, 0.0, 1.0));
 
-	return;
+  return;
 }
 
-__host__ void launch_add_contiguous(float* a, float* b, float* res, size_t len) {
-	if (len < TARGET_THREADS_PER_BLOCK) {
-		add_contiguous<<<1, len>>>(a, b, res, len);
-	} else {
-		size_t n_blocks = (len + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
-		add_contiguous<<<n_blocks, TARGET_THREADS_PER_BLOCK>>>(a, b, res, len);
-	}
-	return;
+__host__ void launch_add_contiguous(float *a, float *b, float *res,
+                                    size_t len) {
+  if (len < TARGET_THREADS_PER_BLOCK) {
+    add_contiguous<<<1, len>>>(a, b, res, len);
+  } else {
+    size_t n_blocks =
+        (len + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
+    add_contiguous<<<n_blocks, TARGET_THREADS_PER_BLOCK>>>(a, b, res, len);
+  }
+  return;
 }
 
-__host__ int launch_is_eq(FloatTensor* a, FloatTensor* b) {
-	int res_h = 1;
-	int* res_d;
-	CUDA_CHECK(cudaMalloc(&res_d, sizeof(int)));
-	CUDA_CHECK(cudaMemcpy(res_d, &res_h, sizeof(int), cudaMemcpyHostToDevice));
+__host__ int launch_is_eq(FloatTensor *a, FloatTensor *b) {
+  int res_h = 1;
+  int *res_d;
+  CUDA_CHECK(cudaMalloc(&res_d, sizeof(int)));
+  CUDA_CHECK(cudaMemcpy(res_d, &res_h, sizeof(int), cudaMemcpyHostToDevice));
 
-	size_t num_entries = a->numel();
-	size_t n_blocks, threads_per_block;
-	if (num_entries < TARGET_THREADS_PER_BLOCK) {
-		n_blocks = 1;
-		threads_per_block = num_entries;
-	} else {
-		n_blocks = (num_entries + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
-		threads_per_block = TARGET_THREADS_PER_BLOCK;
-	}
-	is_eq<<<n_blocks, threads_per_block>>>(a->data_ptr(), b->data_ptr(), a->shape_.data(), a->strides_.data(), a->offset_, b->strides_.data(), b->offset_, a->dim_, res_d);
+  size_t num_entries = a->numel();
+  size_t n_blocks, threads_per_block;
+  if (num_entries < TARGET_THREADS_PER_BLOCK) {
+    n_blocks = 1;
+    threads_per_block = num_entries;
+  } else {
+    n_blocks =
+        (num_entries + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
+    threads_per_block = TARGET_THREADS_PER_BLOCK;
+  }
+  is_eq<<<n_blocks, threads_per_block>>>(
+      a->data_ptr(), b->data_ptr(), a->shape_.data(), a->strides_.data(),
+      a->offset_, b->strides_.data(), b->offset_, a->dim_, res_d);
 
-	CUDA_CHECK(cudaGetLastError());
-	CUDA_CHECK(cudaDeviceSynchronize());
-	
-	CUDA_CHECK(cudaMemcpy(&res_h, res_d, sizeof(int), cudaMemcpyDeviceToHost));
-	return res_h;
+  CUDA_CHECK(cudaGetLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+  CUDA_CHECK(cudaMemcpy(&res_h, res_d, sizeof(int), cudaMemcpyDeviceToHost));
+  return res_h;
 }
 
-
-
-__host__ void launch_add(FloatTensor* a, FloatTensor* b, FloatTensor* res) {
-	size_t num_entries = a->numel();
-	size_t n_blocks, threads_per_block;
-	if (num_entries < TARGET_THREADS_PER_BLOCK) {
-		n_blocks = 1;
-		threads_per_block = num_entries;
-	} else {
-		n_blocks = (num_entries + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
-		threads_per_block = TARGET_THREADS_PER_BLOCK;
-	}
-	add<<<n_blocks, threads_per_block>>>(a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(), a->strides_.data(), a->offset_, b->strides_.data(), b->offset_, a->dim_);
+__host__ void launch_add(FloatTensor *a, FloatTensor *b, FloatTensor *res) {
+  size_t num_entries = a->numel();
+  size_t n_blocks, threads_per_block;
+  if (num_entries < TARGET_THREADS_PER_BLOCK) {
+    n_blocks = 1;
+    threads_per_block = num_entries;
+  } else {
+    n_blocks =
+        (num_entries + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
+    threads_per_block = TARGET_THREADS_PER_BLOCK;
+  }
+  add<<<n_blocks, threads_per_block>>>(
+      a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(),
+      a->strides_.data(), a->offset_, b->strides_.data(), b->offset_, a->dim_);
 }
 
-__host__ void launch_sub(FloatTensor* a, FloatTensor* b, FloatTensor* res) {
-	size_t num_entries = a->numel();
-	size_t n_blocks, threads_per_block;
-	if (num_entries < TARGET_THREADS_PER_BLOCK) {
-		n_blocks = 1;
-		threads_per_block = num_entries;
-	} else {
-		n_blocks = (num_entries + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
-		threads_per_block = TARGET_THREADS_PER_BLOCK;
-	}
-	sub<<<n_blocks, threads_per_block>>>(a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(), a->strides_.data(), a->offset_, b->strides_.data(), b->offset_, a->dim_);
+__host__ void launch_sub(FloatTensor *a, FloatTensor *b, FloatTensor *res) {
+  size_t num_entries = a->numel();
+  size_t n_blocks, threads_per_block;
+  if (num_entries < TARGET_THREADS_PER_BLOCK) {
+    n_blocks = 1;
+    threads_per_block = num_entries;
+  } else {
+    n_blocks =
+        (num_entries + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
+    threads_per_block = TARGET_THREADS_PER_BLOCK;
+  }
+  sub<<<n_blocks, threads_per_block>>>(
+      a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(),
+      a->strides_.data(), a->offset_, b->strides_.data(), b->offset_, a->dim_);
 }
 
-__host__ void launch_mul(FloatTensor* a, FloatTensor* b, FloatTensor* res) {
-	size_t num_entries = a->numel();
-	size_t n_blocks, threads_per_block;
-	if (num_entries < TARGET_THREADS_PER_BLOCK) {
-		n_blocks = 1;
-		threads_per_block = num_entries;
-	} else {
-		n_blocks = (num_entries + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
-		threads_per_block = TARGET_THREADS_PER_BLOCK;
-	}
-	mul<<<n_blocks, threads_per_block>>>(a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(), a->strides_.data(), a->offset_, b->strides_.data(), b->offset_, a->dim_);
+__host__ void launch_mul(FloatTensor *a, FloatTensor *b, FloatTensor *res) {
+  size_t num_entries = a->numel();
+  size_t n_blocks, threads_per_block;
+  if (num_entries < TARGET_THREADS_PER_BLOCK) {
+    n_blocks = 1;
+    threads_per_block = num_entries;
+  } else {
+    n_blocks =
+        (num_entries + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
+    threads_per_block = TARGET_THREADS_PER_BLOCK;
+  }
+  mul<<<n_blocks, threads_per_block>>>(
+      a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(),
+      a->strides_.data(), a->offset_, b->strides_.data(), b->offset_, a->dim_);
 }
 
-
-__host__ void launch_matmul(FloatTensor* a, FloatTensor* b, FloatTensor* res) {
-	size_t num_entries = res->numel();
-	size_t n_blocks, threads_per_block;
-	if (num_entries < TARGET_THREADS_PER_BLOCK) {
-		n_blocks = 1;
-		threads_per_block = num_entries;
-	} else {
-		n_blocks = (num_entries + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
-		threads_per_block = TARGET_THREADS_PER_BLOCK;
-	}
-	matmul<<<n_blocks, threads_per_block>>>(a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(), a->strides_.data(), a->offset_, b->shape_.data(), b->strides_.data(), b->offset_, a->dim_);
+__host__ void launch_matmul(FloatTensor *a, FloatTensor *b, FloatTensor *res) {
+  size_t num_entries = res->numel();
+  size_t n_blocks, threads_per_block;
+  if (num_entries < TARGET_THREADS_PER_BLOCK) {
+    n_blocks = 1;
+    threads_per_block = num_entries;
+  } else {
+    n_blocks =
+        (num_entries + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
+    threads_per_block = TARGET_THREADS_PER_BLOCK;
+  }
+  matmul<<<n_blocks, threads_per_block>>>(
+      a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(),
+      a->strides_.data(), a->offset_, b->shape_.data(), b->strides_.data(),
+      b->offset_, a->dim_);
 }
 
-
-ContiguousTensor3d_Device to_ct3d(FloatTensor* x) {
-	return ContiguousTensor3d_Device{x->data_ptr(), {x->shape_[0], x->shape_[1], x->shape_[2]}};
+ContiguousTensor3d_Device to_ct3d(FloatTensor *x) {
+  return ContiguousTensor3d_Device{x->data_ptr(),
+                                   {x->shape_[0], x->shape_[1], x->shape_[2]}};
 }
 
-__host__ void launch_matmul_3d(FloatTensor* a, FloatTensor* b, FloatTensor* res) {
-	ContiguousTensor3d_Device a_device = to_ct3d(a);
-	ContiguousTensor3d_Device b_device = to_ct3d(b);
-	ContiguousTensor3d_Device res_device = to_ct3d(res);
+__host__ void launch_matmul_3d(FloatTensor *a, FloatTensor *b,
+                               FloatTensor *res) {
+  ContiguousTensor3d_Device a_device = to_ct3d(a);
+  ContiguousTensor3d_Device b_device = to_ct3d(b);
+  ContiguousTensor3d_Device res_device = to_ct3d(res);
 
-	size_t num_entries = res->numel();
+  size_t num_entries = res->numel();
 
-	size_t n_blocks, threads_per_block;
-	if (num_entries < TARGET_THREADS_PER_BLOCK) {
-		n_blocks = 1;
-		threads_per_block = num_entries;
-	} else {
-		n_blocks = (num_entries + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
-		threads_per_block = TARGET_THREADS_PER_BLOCK;
-	}
-	matmul_3d<<<n_blocks, threads_per_block>>>(a_device, b_device, res_device);
+  size_t n_blocks, threads_per_block;
+  if (num_entries < TARGET_THREADS_PER_BLOCK) {
+    n_blocks = 1;
+    threads_per_block = num_entries;
+  } else {
+    n_blocks =
+        (num_entries + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
+    threads_per_block = TARGET_THREADS_PER_BLOCK;
+  }
+  matmul_3d<<<n_blocks, threads_per_block>>>(a_device, b_device, res_device);
 }
 
-__host__ void launch_matmul_tiled(FloatTensor* a, FloatTensor* b, FloatTensor* res) {
-	ContiguousTensor3d_Device a_device = to_ct3d(a);
-	ContiguousTensor3d_Device b_device = to_ct3d(b);
-	ContiguousTensor3d_Device res_device = to_ct3d(res);
+__host__ void launch_matmul_tiled(FloatTensor *a, FloatTensor *b,
+                                  FloatTensor *res) {
+  ContiguousTensor3d_Device a_device = to_ct3d(a);
+  ContiguousTensor3d_Device b_device = to_ct3d(b);
+  ContiguousTensor3d_Device res_device = to_ct3d(res);
 
-	size_t grid_dim_x, grid_dim_y, grid_dim_z;
-	size_t tpb_y, tpb_z;
+  size_t grid_dim_x, grid_dim_y, grid_dim_z;
+  size_t tpb_y, tpb_z;
 
-	size_t n_rows = a->shape_[1];
-	size_t n_cols = b->shape_[2];
+  size_t n_rows = a->shape_[1];
+  size_t n_cols = b->shape_[2];
 
-	// batches are taken care of by grid_dim,
-	// no need to have different batches in the same block
-	grid_dim_x = a->shape_[0];
+  // batches are taken care of by grid_dim,
+  // no need to have different batches in the same block
+  grid_dim_x = a->shape_[0];
 
-	// rows
-	size_t row_threads = (n_rows + TILE_ROWS - 1) / TILE_ROWS;
+  // rows
+  size_t row_threads = (n_rows + TILE_ROWS - 1) / TILE_ROWS;
 
-	if (row_threads > TPB_ROW) {
-		tpb_z = TPB_ROW;
-		grid_dim_z = (row_threads + TPB_ROW - 1) / TPB_ROW;
-	} else {
-		tpb_z = row_threads;
-		grid_dim_z = 1;
-	}
+  if (row_threads > TPB_ROW) {
+    tpb_z = TPB_ROW;
+    grid_dim_z = (row_threads + TPB_ROW - 1) / TPB_ROW;
+  } else {
+    tpb_z = row_threads;
+    grid_dim_z = 1;
+  }
 
-	// cols
-	size_t col_threads = (n_cols + TILE_COLS - 1) / TILE_COLS;
+  // cols
+  size_t col_threads = (n_cols + TILE_COLS - 1) / TILE_COLS;
 
-	if (col_threads > TPB_COL) {
-		tpb_y = TPB_COL;
-		grid_dim_y = (col_threads + TPB_COL - 1) / TPB_COL;
-	} else {
-		tpb_y = col_threads;
-		grid_dim_y = 1;
-	}
+  if (col_threads > TPB_COL) {
+    tpb_y = TPB_COL;
+    grid_dim_y = (col_threads + TPB_COL - 1) / TPB_COL;
+  } else {
+    tpb_y = col_threads;
+    grid_dim_y = 1;
+  }
 
-	dim3 blocks(grid_dim_x, grid_dim_y, grid_dim_z);
-	dim3 threads(1, tpb_y, tpb_z);
-	
-	matmul_tiled<<<blocks, threads>>>(a_device, b_device, res_device);
-	CUDA_CHECK(cudaGetLastError());
-	CUDA_CHECK(cudaDeviceSynchronize());
+  dim3 blocks(grid_dim_x, grid_dim_y, grid_dim_z);
+  dim3 threads(1, tpb_y, tpb_z);
+
+  matmul_tiled<<<blocks, threads>>>(a_device, b_device, res_device);
+  CUDA_CHECK(cudaGetLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
+__host__ void launch_matmul_cublas(FloatTensor *a, FloatTensor *b,
+                                   FloatTensor *res) {
+  ContiguousTensor3d_Device a_device = to_ct3d(a);
+  ContiguousTensor3d_Device b_device = to_ct3d(b);
+  ContiguousTensor3d_Device res_device = to_ct3d(res);
+
+  cublasHandle_t handle;
+  CUBLAS_CHECK(cublasCreate(&handle));
+
+  // scalars alpha and beta will be stored on host
+  CUBLAS_CHECK(cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_HOST));
+
+  // since cublas expects matrices in column-major order
+  // we need to feed cublas B-transpose first, then A-transpose
+  cublasOperation_t transa = CUBLAS_OP_T;
+  cublasOperation_t transb = CUBLAS_OP_T;
+
+  int m = (int)b_device.shape[2];
+  int n = (int)a_device.shape[1];
+  int k = (int)a_device.shape[2];
+
+  int lda = k;
+  int ldb = m;
+  int ldc = m;
+
+  float alpha = 1.0;
+  float beta = 0.0;
+
+  float *A = a_device.data;
+  float *B = b_device.data;
+  float *C = res_device.data;
+
+  long long int stridea = a_device.shape[1] * a_device.shape[2];
+  long long int strideb = b_device.shape[1] * b_device.shape[2];
+  long long int stridec = res_device.shape[1] * res_device.shape[2];
+
+  int batch_count = a_device.shape[0];
+
+  CUBLAS_CHECK(cublasSgemmStridedBatched(
+      handle, transb, transa, m, n, k, &alpha, B, ldb, strideb, A, lda, stridea,
+      &beta, C, ldc, stridec, batch_count));
+
+  cublasDestroy(handle);
+}
