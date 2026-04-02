@@ -25,9 +25,9 @@ add_executable(debug src/cpp/tensor.cpp src/cpp/kernels.cu tests/cpp/debug_matmu
 target_link_libraries(_core PRIVATE CUDA::cudart)
 target_link_libraries(bench PRIVATE CUDA::cudart)
 target_link_libraries(debug PRIVATE CUDA::cudart)
-target_link_libraries(_core PRIVATE CUDA::curand)
-target_link_libraries(bench PRIVATE CUDA::curand)
-target_link_libraries(debug PRIVATE CUDA::curand)
+target_link_libraries(_core PRIVATE CUDA::curand CUDA::cublas)
+target_link_libraries(bench PRIVATE CUDA::curand CUDA::cublas)
+target_link_libraries(debug PRIVATE CUDA::curand CUDA::cublas)
 
 target_compile_options(debug PRIVATE
     -g $<$<COMPILE_LANGUAGE:CUDA>:-G>

@@ -1,3 +1,4 @@
+#include <cassert>
 #include <cstdio>
 #include <iostream>
 #include <stdexcept>
@@ -6,8 +7,8 @@
 #include "cublas_v2.h"
 #include <curand.h>
 
-#include "cuda_utils.h"
 #include "tensor.h"
+#include "cuda_utils.h"
 
 // Hard-coded constant specific to the RTX 3050
 #define MAX_THREADS_PER_BLOCK (1024)
@@ -344,6 +345,45 @@ __global__ void matmul_tiled(ContiguousTensor3d_Device a,
   }
 }
 
+__global__ void transpose(ContiguousTensor3d_Device a, ContiguousTensor3d_Device b) {
+	// a: (batch, r, c)
+	// b: (batch, c, r)
+	
+	// first: collaboratively copy from a to shared memory
+	__shared__ float data[1024];
+
+	// one warp = one threadIdx.y... want varying x to be the small dimension
+	size_t batch = blockIdx.z;
+	size_t a_row = 32 * blockIdx.x + threadIdx.x;
+	size_t a_col = 32 * blockIdx.y + threadIdx.y;
+
+	size_t data_row = threadIdx.x;
+	size_t data_col = threadIdx.y;
+
+	size_t a_idx = batch * a.shape[1] * a.shape[2] + a_row * a.shape[2] + a_col;
+	size_t data_idx = data_row * 32 + data_col;
+
+	if (a_row < a.shape[1] && a_col < a.shape[2]) {
+		data[data_idx] = a.data[a_idx];
+	}
+
+	__syncthreads();
+
+	// then: copy from shared memory to b
+	size_t b_row = 32 * blockIdx.y + threadIdx.x;
+	size_t b_col = 32 * blockIdx.x + threadIdx.y;
+
+	data_row = threadIdx.y;
+	data_col = threadIdx.x;
+
+	size_t b_idx = batch * b.shape[1] * b.shape[2] + b_row * b.shape[2] + b_col;
+	data_idx = data_row * 32 + data_col;
+
+	if (b_row < b.shape[1] && b_col < b.shape[2]) {
+		b.data[b_idx] = data[data_idx];
+	}
+}
+
 // ============================= Launchers
 // ======================================
 __host__ void launch_randn(float *a, size_t len, int seed) {
@@ -542,11 +582,13 @@ __host__ void launch_matmul_cublas(FloatTensor *a, FloatTensor *b,
 
   // scalars alpha and beta will be stored on host
   CUBLAS_CHECK(cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_HOST));
+  cublasPointerMode_t mode;
+  std::cout << "Pointer mode: " << cublasGetPointerMode(handle, &mode) << std::endl;
 
   // since cublas expects matrices in column-major order
   // we need to feed cublas B-transpose first, then A-transpose
-  cublasOperation_t transa = CUBLAS_OP_T;
-  cublasOperation_t transb = CUBLAS_OP_T;
+  cublasOperation_t transa = CUBLAS_OP_N;
+  cublasOperation_t transb = CUBLAS_OP_N;
 
   int m = (int)b_device.shape[2];
   int n = (int)a_device.shape[1];
@@ -569,9 +611,37 @@ __host__ void launch_matmul_cublas(FloatTensor *a, FloatTensor *b,
 
   int batch_count = a_device.shape[0];
 
+  std::cout << "Params: m=" << m << ", n=" << n << ", k=" << k << std::endl;
+  std::cout << "lda=" << lda << ", ldb=" << ldb << ", ldc=" << ldc << std::endl;
+  std::cout << "stridea=" << stridea << ", strideb=" << strideb << ", stridec=" << stridec << std::endl;
+
   CUBLAS_CHECK(cublasSgemmStridedBatched(
-      handle, transb, transa, m, n, k, &alpha, B, ldb, strideb, A, lda, stridea,
+      handle, transb, transa, m, n, k, &alpha, B, ldb, strideb, A, lda, stridea, 
       &beta, C, ldc, stridec, batch_count));
 
   cublasDestroy(handle);
+}
+
+__host__ void launch_transpose(FloatTensor *a, FloatTensor *b) {
+  ContiguousTensor3d_Device a_device = to_ct3d(a);
+  ContiguousTensor3d_Device b_device = to_ct3d(b);
+
+  size_t batch = a_device.shape[0];
+  size_t a_rows = a_device.shape[1];
+  size_t a_cols = a_device.shape[2];
+
+  assert(b_device.shape[0] == a_device.shape[0]);
+  assert(b_device.shape[1] == a_device.shape[2]);
+  assert(b_device.shape[2] == a_device.shape[1]);
+
+  size_t grid_x = (a_rows + 31) / 32;
+  size_t grid_y = (a_cols + 31) / 32;
+  size_t grid_z = batch;
+  size_t block_x = 32;
+  size_t block_y = 32;
+
+  dim3 gridDim(grid_x, grid_y, grid_z);
+  dim3 blockDim(block_x, block_y);
+
+  transpose<<<gridDim, blockDim>>>(a_device, b_device);
 }

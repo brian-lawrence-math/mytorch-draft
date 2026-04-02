@@ -64,6 +64,9 @@ struct FloatTensor {
   bool is_contiguous();
   FloatTensor matmul_3d(FloatTensor &other);
   FloatTensor matmul_tiled(FloatTensor &other);
+  FloatTensor matmul_cublas(FloatTensor &other);
+
+  FloatTensor transpose();
 };
 
 #endif

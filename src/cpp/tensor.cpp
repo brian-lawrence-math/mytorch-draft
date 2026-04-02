@@ -3,15 +3,16 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <chrono>
 #include <iostream>
 #include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include "tensor.h"
 #include "cuda_utils.h"
 #include "kernels.cuh"
-#include "tensor.h"
 
 // ======================== Memory management ========================
 float *alloc_float(size_t n, Device dev) {
@@ -238,13 +239,8 @@ public:
   }
 
   FloatBlock *clone(Device new_dev) {
-    // debug only:
     FloatBlock *new_block = new FloatBlock(size, new_dev);
     copy_floats(new_block->data, new_dev, this->data, this->dev, size);
-
-    float val;
-    CUDA_CHECK(cudaMemcpy(&val, new_block->data, sizeof(float),
-                          cudaMemcpyDeviceToHost));
 
     return new_block;
   }
@@ -720,3 +716,43 @@ FloatTensor FloatTensor::matmul_tiled(FloatTensor &other) {
     return this->matmul(other);
   }
 }
+
+FloatTensor FloatTensor::matmul_cublas(FloatTensor &other) {
+  if (!this->is_contiguous() && !other.is_contiguous()) {
+    throw std::invalid_argument(
+        "Function matmul_3d() only accepts contiguous tensors.");
+  }
+
+  if (this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
+    std::vector<size_t> result_shape = validate_matmul_shape(other);
+
+    // allocate the memory
+    FloatTensor result = FloatTensor::zeros(result_shape, this->dev_());
+
+    std::cout << "CUDA matmul_cublas kernel" << std::endl;
+    launch_matmul_cublas(this, &other, &result);
+
+    return result;
+  } else {
+    return this->matmul(other);
+  }
+}
+
+FloatTensor FloatTensor::transpose() {
+	if (!this->is_contiguous() || this->dim_ != 3) {
+		throw std::invalid_argument("Function transpose() requires contiguous 3d argument.");
+	}
+	if (this->dev_() != Device::GPU) {
+		throw std::invalid_argument("Function transpose() only implemented on GPU.");
+	}
+
+	std::vector<size_t> result_shape{this->shape_[0], this->shape_[2], this->shape_[1]};
+
+	FloatTensor result = FloatTensor::zeros(result_shape, this->dev_());
+
+	std::cout << "CUDA transpose kernel" << std::endl;
+	launch_transpose(this, &result);
+
+	return result;
+}
+	
