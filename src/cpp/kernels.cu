@@ -350,34 +350,34 @@ __global__ void transpose(ContiguousTensor3d_Device a, ContiguousTensor3d_Device
 	// b: (batch, c, r)
 	
 	// first: collaboratively copy from a to shared memory
-	__shared__ float data[1024];
+	__shared__ float data[33*33];
 
 	// one warp = one threadIdx.y... want varying x to be the small dimension
 	size_t batch = blockIdx.z;
-	size_t a_row = 32 * blockIdx.x + threadIdx.x;
-	size_t a_col = 32 * blockIdx.y + threadIdx.y;
+	size_t a_row = 32 * blockIdx.x + threadIdx.y;
+	size_t a_col = 32 * blockIdx.y + threadIdx.x;
 
-	size_t data_row = threadIdx.x;
-	size_t data_col = threadIdx.y;
+	size_t data_row = threadIdx.y;
+	size_t data_col = threadIdx.x;
 
 	size_t a_idx = batch * a.shape[1] * a.shape[2] + a_row * a.shape[2] + a_col;
-	size_t data_idx = data_row * 32 + data_col;
+	size_t data_idx = data_row * 33 + data_col;
 
 	if (a_row < a.shape[1] && a_col < a.shape[2]) {
-		data[data_idx] = a.data[a_idx];
+		data[data_idx] = __ldg(&a.data[a_idx]);
 	}
 
 	__syncthreads();
 
 	// then: copy from shared memory to b
-	size_t b_row = 32 * blockIdx.y + threadIdx.x;
-	size_t b_col = 32 * blockIdx.x + threadIdx.y;
+	size_t b_row = 32 * blockIdx.y + threadIdx.y;
+	size_t b_col = 32 * blockIdx.x + threadIdx.x;
 
-	data_row = threadIdx.y;
-	data_col = threadIdx.x;
+	data_row = threadIdx.x;
+	data_col = threadIdx.y;
 
 	size_t b_idx = batch * b.shape[1] * b.shape[2] + b_row * b.shape[2] + b_col;
-	data_idx = data_row * 32 + data_col;
+	data_idx = data_row * 33 + data_col;
 
 	if (b_row < b.shape[1] && b_col < b.shape[2]) {
 		b.data[b_idx] = data[data_idx];
