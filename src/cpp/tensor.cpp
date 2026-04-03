@@ -738,6 +738,27 @@ FloatTensor FloatTensor::matmul_cublas(FloatTensor &other) {
   }
 }
 
+FloatTensor FloatTensor::matmul_tiled_2(FloatTensor &other) {
+  if (!this->is_contiguous() && !other.is_contiguous()) {
+    throw std::invalid_argument(
+        "Function matmul_3d() only accepts contiguous tensors.");
+  }
+
+  if (this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
+    std::vector<size_t> result_shape = validate_matmul_shape(other);
+
+    // allocate the memory
+    FloatTensor result = FloatTensor::zeros(result_shape, this->dev_());
+
+    std::cout << "CUDA matmul_tiled_2 kernel" << std::endl;
+    launch_matmul_tiled_2(this, &other, &result);
+
+    return result;
+  } else {
+    return this->matmul(other);
+  }
+}
+
 FloatTensor FloatTensor::transpose() {
 	if (!this->is_contiguous() || this->dim_ != 3) {
 		throw std::invalid_argument("Function transpose() requires contiguous 3d argument.");

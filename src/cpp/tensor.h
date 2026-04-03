@@ -65,6 +65,7 @@ struct FloatTensor {
   FloatTensor matmul_3d(FloatTensor &other);
   FloatTensor matmul_tiled(FloatTensor &other);
   FloatTensor matmul_cublas(FloatTensor &other);
+  FloatTensor matmul_tiled_2(FloatTensor &other);
 
   FloatTensor transpose();
 };

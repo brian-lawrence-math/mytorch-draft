@@ -25,6 +25,14 @@
 #define TILE_ROWS (4)
 #define TILE_COLS (4)
 
+#define TM (4)
+#define TN (4)
+#define TPBM (32)
+#define TPBN (32)
+#define BM (TM * TPBM)
+#define BN (TN * TPBN)
+#define BK (8)
+
 // make sure blockDim.z is a multiple of warp size
 static_assert((TPB_ROW % 32 == 0));
 
@@ -345,42 +353,127 @@ __global__ void matmul_tiled(ContiguousTensor3d_Device a,
   }
 }
 
+__global__ void matmul_tiled_2(ContiguousTensor3d_Device a, ContiguousTensor3d_Device b,
+		ContiguousTensor3d_Device res) {
+	// blocks: (batch, row, col)
+	// threads: (n_threads, 1, 1)  -- I will manage it myself
+	
+	size_t M = a.shape[1], K = a.shape[2], N = b.shape[2];
+	size_t a_row_base = BM * blockIdx.y;
+	size_t b_col_base = BN * blockIdx.z;
+	size_t batch_idx = blockIdx.x;
+	float* A = a.data + batch_idx * a.shape[1] * a.shape[2] + a_row_base * a.shape[2];
+	float* B = b.data + batch_idx * b.shape[1] * b.shape[2] + b_col_base;
+	float* RES = res.data + batch_idx * res.shape[1] * res.shape[2] + a_row_base * res.shape[2] + b_col_base;
+
+	__shared__ float A_s[BM * BK];
+	__shared__ float B_s[BK * BN];
+
+	// store results in registers
+	// each thread will be responsible for TM * TN entries of C...
+	// TM rows and TN cols, the rows strided every TPBM, the cols strided every TPBN
+	float tmp[TM * TN] = {0};
+
+	size_t this_thread_row = threadIdx.x / TPBN;
+	size_t this_thread_col = threadIdx.x % TPBN;
+
+	for(size_t k0 = 0; k0 < K; k0 += BK) {
+		__syncthreads();
+		// load a and b
+		// A_s[i, j] = A[a_row + i, k + j]
+
+		// values to fill: BM * BK
+		// threads: TPB
+		// want: blockDim.x div. by BK
+		for(size_t a_idx = threadIdx.x; a_idx < BM * BK; a_idx += blockDim.x) {
+			size_t i = a_idx / BK;
+			size_t j = a_idx % BK;
+			if (k0 + j < K && i + a_row_base < M) {
+				A_s[i * BK + j] = A[i * (a.shape[2]) + k0 + j];
+			} else {
+				A_s[i * BK + j] = 0;
+			}
+		}
+
+		// B_s[i, j] = B[k + i, b_col + j]
+		for(size_t b_idx = threadIdx.x; b_idx < BK * BN; b_idx += blockDim.x) {
+			size_t i = b_idx / BN;
+			size_t j = b_idx % BN;
+			if (k0 + i < K && j + b_col_base < N) {
+				B_s[i * BN + j] = B[(k0 + i) * b.shape[2] + j];
+			} else {
+				B_s[i * BN + j] = 0;
+			}
+		}
+
+		__syncthreads();
+		for(size_t k = 0; k < BK; k++) {
+			for(size_t row_counter = 0; row_counter < TM; row_counter ++) {
+				// filling in row a_row_base + row_counter * TPBM + this_thread_row of C
+				// which is row row_counter of tmp
+				size_t row = row_counter * TPBM + this_thread_row;
+				float a_val = A_s[row * BK + k];
+				for(size_t col_counter = 0; col_counter < TN; col_counter ++) {
+					// col b_col_base + col_counter * TPBN + this_thread_col of C
+					// which is col col_counter of tmp
+					size_t col = col_counter * TPBN + this_thread_col;
+					float b_val = B_s[k * BN + col];
+
+					tmp[row_counter * TN + col_counter] += a_val * b_val;
+				}
+			}
+		}
+	}
+	// now tmp[row * TN + col] goes into RES[(row * TPBM + this_thread_row) * res.shape[2] + (col * TPBN + this_thread_col)]
+	for(size_t row_counter = 0; row_counter < TM; row_counter ++) {
+		for(size_t col_counter = 0; col_counter < TN; col_counter ++) {
+			RES[(row_counter * TPBM + this_thread_row) * res.shape[2] + (col_counter * TPBN + this_thread_col)] = tmp[row_counter * TN + col_counter];
+		}
+	}
+}
+
 __global__ void transpose(ContiguousTensor3d_Device a, ContiguousTensor3d_Device b) {
 	// a: (batch, r, c)
 	// b: (batch, c, r)
 	
 	// first: collaboratively copy from a to shared memory
-	__shared__ float data[33*33];
+	__shared__ float data[36*36];
 
 	// one warp = one threadIdx.y... want varying x to be the small dimension
 	size_t batch = blockIdx.z;
-	size_t a_row = 32 * blockIdx.x + threadIdx.y;
-	size_t a_col = 32 * blockIdx.y + threadIdx.x;
+	size_t a_row = 16 * blockIdx.x + threadIdx.y;
+	size_t a_col = 16 * blockIdx.y + 4 * threadIdx.x;
 
 	size_t data_row = threadIdx.y;
-	size_t data_col = threadIdx.x;
+	size_t data_col = 4 * threadIdx.x;
 
 	size_t a_idx = batch * a.shape[1] * a.shape[2] + a_row * a.shape[2] + a_col;
-	size_t data_idx = data_row * 33 + data_col;
+	size_t data_idx = data_row * 36 + data_col;
 
 	if (a_row < a.shape[1] && a_col < a.shape[2]) {
-		data[data_idx] = __ldg(&a.data[a_idx]);
+		reinterpret_cast<float4*>(&data[data_idx])[0] = reinterpret_cast<float4*>(&a.data[a_idx])[0];
 	}
 
 	__syncthreads();
 
 	// then: copy from shared memory to b
-	size_t b_row = 32 * blockIdx.y + threadIdx.y;
-	size_t b_col = 32 * blockIdx.x + threadIdx.x;
+	size_t b_row = 16 * blockIdx.y + threadIdx.y;
+	size_t b_col = 16 * blockIdx.x + 4 * threadIdx.x;
 
-	data_row = threadIdx.x;
+	data_row = 4 * threadIdx.x;
 	data_col = threadIdx.y;
 
 	size_t b_idx = batch * b.shape[1] * b.shape[2] + b_row * b.shape[2] + b_col;
-	data_idx = data_row * 33 + data_col;
+	data_idx = data_row * 36 + data_col;
+
+	float4 tmp;
+	tmp.x = data[data_row * 36 + data_col];
+	tmp.y = data[(data_row + 1) * 36 + data_col];
+	tmp.z = data[(data_row + 2) * 36 + data_col];
+	tmp.w = data[(data_row + 3) * 36 + data_col];
 
 	if (b_row < b.shape[1] && b_col < b.shape[2]) {
-		b.data[b_idx] = data[data_idx];
+		reinterpret_cast<float4*>(&b.data[b_idx])[0] = tmp;
 	}
 }
 
@@ -622,6 +715,30 @@ __host__ void launch_matmul_cublas(FloatTensor *a, FloatTensor *b,
   cublasDestroy(handle);
 }
 
+__host__ void launch_matmul_tiled_2(FloatTensor *a, FloatTensor *b, FloatTensor *res) {
+	// blocks: (batch, row, col)
+	// threads: (n_threads, 1, 1)  -- I will manage it myself
+	
+  ContiguousTensor3d_Device a_device = to_ct3d(a);
+  ContiguousTensor3d_Device b_device = to_ct3d(b);
+  ContiguousTensor3d_Device res_device = to_ct3d(res);
+
+  size_t gridDim_x = a_device.shape[0];
+  size_t gridDim_y = (a_device.shape[1] + BM - 1) / BM;
+  size_t gridDim_z = (b_device.shape[2] + BN - 1) / BN;
+
+  size_t n_threads = TPBM * TPBN;
+
+  dim3 gridDim(gridDim_x, gridDim_y, gridDim_z);
+  dim3 blockDim(n_threads, 1, 1);
+
+  matmul_tiled_2<<<gridDim, blockDim>>>(a_device, b_device, res_device);
+
+  CUDA_CHECK(cudaGetLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
+
+}
+
 __host__ void launch_transpose(FloatTensor *a, FloatTensor *b) {
   ContiguousTensor3d_Device a_device = to_ct3d(a);
   ContiguousTensor3d_Device b_device = to_ct3d(b);
@@ -634,11 +751,11 @@ __host__ void launch_transpose(FloatTensor *a, FloatTensor *b) {
   assert(b_device.shape[1] == a_device.shape[2]);
   assert(b_device.shape[2] == a_device.shape[1]);
 
-  size_t grid_x = (a_rows + 31) / 32;
-  size_t grid_y = (a_cols + 31) / 32;
+  size_t grid_x = (a_rows + 15) / 16;
+  size_t grid_y = (a_cols + 15) / 16;
   size_t grid_z = batch;
-  size_t block_x = 32;
-  size_t block_y = 32;
+  size_t block_x = 4;
+  size_t block_y = 16;
 
   dim3 gridDim(grid_x, grid_y, grid_z);
   dim3 blockDim(block_x, block_y);

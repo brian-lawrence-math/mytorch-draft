@@ -10,4 +10,5 @@ void launch_matmul(FloatTensor *a, FloatTensor *b, FloatTensor *res);
 void launch_matmul_3d(FloatTensor *a, FloatTensor *b, FloatTensor *res);
 void launch_matmul_tiled(FloatTensor *a, FloatTensor *b, FloatTensor *res);
 void launch_matmul_cublas(FloatTensor *a, FloatTensor *b, FloatTensor *res);
+void launch_matmul_tiled_2(FloatTensor *a, FloatTensor *b, FloatTensor *res);
 void launch_transpose(FloatTensor *a, FloatTensor *b);

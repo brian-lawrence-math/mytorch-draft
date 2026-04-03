@@ -14,7 +14,7 @@ void bench_matmul() {
 	FloatTensor t1 = FloatTensor::randn({100, 1000, 1000}, Device::GPU);
 	FloatTensor t2 = FloatTensor::randn({100, 1000, 1000}, Device::GPU);
 
-	size_t raw_idx = 0;
+	size_t raw_idx = 14141732;
 
 	t1.move_to_device(Device::GPU);
 	t2.move_to_device(Device::GPU);
@@ -22,7 +22,7 @@ void bench_matmul() {
 	cudaDeviceSynchronize();
 	auto start = std::chrono::steady_clock::now();
 
-	FloatTensor res = t1.matmul_tiled(t2);
+	FloatTensor res = t1.matmul_tiled_2(t2);
 
 	cudaDeviceSynchronize();
 	auto stop = std::chrono::steady_clock::now();
@@ -53,7 +53,7 @@ void bench_matmul() {
 }
 
 void bench_clone() {
-	FloatTensor t1 = FloatTensor::randn({250, 1000, 1000}, Device::GPU);
+	FloatTensor t1 = FloatTensor::randn({250, 1024, 1024}, Device::GPU);
 	cudaDeviceSynchronize();
 
 	auto start = std::chrono::steady_clock::now();
@@ -82,10 +82,13 @@ void bench_transpose() {
 	float v2 = t2.get_idx(LogicalIndex{std::vector<ssize_t>{3, 7, 5}});
 	std::cout << "Values: " << v1 << "=" << v2 << std::endl;
 
+	v1 = t1.get_idx(LogicalIndex{std::vector<ssize_t>{3, 18, 16}});
+	v2 = t2.get_idx(LogicalIndex{std::vector<ssize_t>{3, 16, 18}});
+	std::cout << "Values: " << v1 << "=" << v2 << std::endl;
 }
 
 int main() {
-	bench_transpose();
+	bench_matmul();
 	return 0;
 }
 
