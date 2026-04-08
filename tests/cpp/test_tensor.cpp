@@ -22,6 +22,48 @@ size_t cuda_mem_free() {
 	return mem_free;
 }
 
+FloatTensor make_sequential_tensor(std::vector<size_t> shape, Device dev) {
+	FloatTensor t = FloatTensor::zeros(shape, dev);
+	for (size_t i = 0; i < t.numel(); i++) {
+		t.set_raw_idx(i, static_cast<float>(i + 1));
+	}
+	return t;
+}
+
+FloatTensor make_noncontiguous_tensor(Device dev) {
+	FloatTensor base = make_sequential_tensor({3, 4}, dev);
+	return base.view_raw({3, 4}, 0, {1, 3});
+}
+
+void assert_raw_values(FloatTensor t, std::vector<float> expected) {
+	assert(t.is_contiguous());
+	assert(t.numel() == expected.size());
+	for (size_t i = 0; i < expected.size(); i++) {
+		ASSERT_ALMOST_EQUAL(t.get_raw_idx(i), expected[i]);
+	}
+}
+
+void assert_same_logical_values_recursive(FloatTensor &lhs, FloatTensor &rhs,
+	                                      std::vector<ssize_t> &coords,
+	                                      size_t dim) {
+	if (dim == lhs.shape_.size()) {
+		ASSERT_ALMOST_EQUAL(lhs.get_idx(LogicalIndex{coords}),
+		                    rhs.get_idx(LogicalIndex{coords}));
+		return;
+	}
+
+	for (size_t i = 0; i < lhs.shape_[dim]; i++) {
+		coords[dim] = static_cast<ssize_t>(i);
+		assert_same_logical_values_recursive(lhs, rhs, coords, dim + 1);
+	}
+}
+
+void assert_same_logical_values(FloatTensor lhs, FloatTensor rhs) {
+	assert(lhs.shape_ == rhs.shape_);
+	std::vector<ssize_t> coords(lhs.shape_.size(), 0);
+	assert_same_logical_values_recursive(lhs, rhs, coords, 0);
+}
+
 void test_tensor_constructor() {
 	FloatTensor t = FloatTensor::zeros_1d(10);
 	float x = t.get_raw_idx(3);
@@ -248,6 +290,115 @@ void test_view_rejects_noncontiguous_tensor() {
 	assert(threw);
 }
 
+void test_contiguous_clone_preserves_shape_and_values(Device dev) {
+	FloatTensor source = make_noncontiguous_tensor(dev);
+	FloatTensor cloned = source.contiguous_clone();
+
+	assert(cloned.shape_ == source.shape_);
+	assert(cloned.is_contiguous());
+	assert(cloned.block_ != source.block_);
+	assert_same_logical_values(source, cloned);
+	assert_raw_values(cloned, {1.0f, 4.0f, 7.0f, 10.0f,
+	                          2.0f, 5.0f, 8.0f, 11.0f,
+	                          3.0f, 6.0f, 9.0f, 12.0f});
+}
+
+void test_contiguous_clone_breaks_aliasing(Device dev) {
+	FloatTensor source = make_noncontiguous_tensor(dev);
+	FloatTensor cloned = source.contiguous_clone();
+
+	cloned.set_idx(LogicalIndex{{1, 2}}, 1234.5f);
+	ASSERT_ALMOST_EQUAL(source.get_idx(LogicalIndex{{1, 2}}), 8.0f);
+	ASSERT_ALMOST_EQUAL(cloned.get_idx(LogicalIndex{{1, 2}}), 1234.5f);
+}
+
+void test_reshape_contiguous_matches_flat_order(Device dev) {
+	FloatTensor source = make_sequential_tensor({2, 3}, dev);
+	FloatTensor reshaped = source.reshape({3, 2});
+
+	assert(reshaped.shape_ == std::vector<size_t>({3, 2}));
+	assert(reshaped.is_contiguous());
+	assert(reshaped.block_ != source.block_);
+	assert_raw_values(reshaped, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f});
+}
+
+void test_reshape_noncontiguous_matches_contiguous_clone_then_reshape(Device dev) {
+	FloatTensor source = make_noncontiguous_tensor(dev);
+	FloatTensor reshaped = source.reshape({2, 6});
+	FloatTensor expected = source.contiguous_clone().reshape({2, 6});
+
+	assert(reshaped.shape_ == std::vector<size_t>({2, 6}));
+	assert(reshaped.is_contiguous());
+	assert(reshaped.block_ != source.block_);
+	assert_same_logical_values(expected, reshaped);
+	assert_raw_values(reshaped, {1.0f, 4.0f, 7.0f, 10.0f, 2.0f, 5.0f,
+	                            8.0f, 11.0f, 3.0f, 6.0f, 9.0f, 12.0f});
+}
+
+void test_reshape_infers_negative_one(Device dev) {
+	FloatTensor source = make_noncontiguous_tensor(dev);
+	FloatTensor reshaped = source.reshape({3, -1});
+
+	assert(reshaped.shape_ == std::vector<size_t>({3, 4}));
+	assert(reshaped.is_contiguous());
+	assert_raw_values(reshaped, {1.0f, 4.0f, 7.0f, 10.0f,
+	                            2.0f, 5.0f, 8.0f, 11.0f,
+	                            3.0f, 6.0f, 9.0f, 12.0f});
+}
+
+void test_reshape_rejects_multiple_negative_one(Device dev) {
+	FloatTensor base = make_sequential_tensor({3, 4}, dev);
+	bool threw = false;
+	try {
+		base.reshape({-1, -1});
+	} catch (const std::invalid_argument&) {
+		threw = true;
+	}
+	assert(threw);
+}
+
+void test_reshape_rejects_zero_and_negative_dims(Device dev) {
+	FloatTensor base = make_sequential_tensor({3, 4}, dev);
+
+	bool threw_zero = false;
+	try {
+		base.reshape({0, 12});
+	} catch (const std::invalid_argument&) {
+		threw_zero = true;
+	}
+	assert(threw_zero);
+
+	bool threw_negative = false;
+	try {
+		base.reshape({-2, 6});
+	} catch (const std::invalid_argument&) {
+		threw_negative = true;
+	}
+	assert(threw_negative);
+}
+
+void test_reshape_rejects_invalid_numel(Device dev) {
+	FloatTensor base = make_sequential_tensor({3, 4}, dev);
+	bool threw = false;
+	try {
+		base.reshape({5, 5});
+	} catch (const std::invalid_argument&) {
+		threw = true;
+	}
+	assert(threw);
+}
+
+void run_layout_tests(Device dev) {
+	test_contiguous_clone_preserves_shape_and_values(dev);
+	test_contiguous_clone_breaks_aliasing(dev);
+	test_reshape_contiguous_matches_flat_order(dev);
+	test_reshape_noncontiguous_matches_contiguous_clone_then_reshape(dev);
+	test_reshape_infers_negative_one(dev);
+	test_reshape_rejects_multiple_negative_one(dev);
+	test_reshape_rejects_zero_and_negative_dims(dev);
+	test_reshape_rejects_invalid_numel(dev);
+}
+
 int main() {
 	test_tensor_constructor();
 	test_value_assignment();
@@ -262,6 +413,8 @@ int main() {
 	test_view_rejects_zero_and_negative_dims();
 	test_view_rejects_invalid_numel();
 	test_view_rejects_noncontiguous_tensor();
+	run_layout_tests(Device::CPU);
+	run_layout_tests(Device::GPU);
 
 	std::cout << "All tests passed."  << std::endl;
 }

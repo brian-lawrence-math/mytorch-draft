@@ -507,7 +507,7 @@ FloatTensor FloatTensor::view_raw(std::vector<size_t> new_shape,
 std::vector<size_t> FloatTensor::validate_new_shape(std::vector<ssize_t> new_shape) {
   size_t count = 0;
   ssize_t idx = -1;
-  for (ssize_t i = 0; i++; i < new_shape.size()) {
+  for (ssize_t i = 0; i < new_shape.size(); i++) {
 	  if (new_shape[i] <= 0) {
 		  if (new_shape[i] == -1) {
 			  count++;
@@ -570,8 +570,8 @@ FloatTensor FloatTensor::reshape(std::vector<ssize_t> new_shape) {
 		for (size_t i = 0; i < this->numel(); i++) {
 			LogicalIndex this_log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
 			LogicalIndex other_log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, result.shape_);
-			float val = this->get_idx(log_idx);
-			result.set_idx(log_idx, val);
+			float val = this->get_idx(this_log_idx);
+			result.set_idx(other_log_idx, val);
 		}
 	}
 	return result;

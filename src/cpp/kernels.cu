@@ -557,6 +557,9 @@ __host__ void launch_contiguous_clone(FloatTensor *a, FloatTensor *res) {
   contiguous_clone<<<n_blocks, threads_per_block>>>(
 		  a->data_ptr(), res->data_ptr(), a->shape_.data(), a->strides_.data(),
 		  a->offset_, a->dim_);
+
+  CUDA_CHECK(cudaGetLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __host__ void launch_add(FloatTensor *a, FloatTensor *b, FloatTensor *res) {
@@ -589,6 +592,9 @@ __host__ void launch_sub(FloatTensor *a, FloatTensor *b, FloatTensor *res) {
   sub<<<n_blocks, threads_per_block>>>(
       a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(),
       a->strides_.data(), a->offset_, b->strides_.data(), b->offset_, a->dim_);
+
+  CUDA_CHECK(cudaGetLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __host__ void launch_mul(FloatTensor *a, FloatTensor *b, FloatTensor *res) {
@@ -605,6 +611,9 @@ __host__ void launch_mul(FloatTensor *a, FloatTensor *b, FloatTensor *res) {
   mul<<<n_blocks, threads_per_block>>>(
       a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(),
       a->strides_.data(), a->offset_, b->strides_.data(), b->offset_, a->dim_);
+
+  CUDA_CHECK(cudaGetLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __host__ void launch_matmul(FloatTensor *a, FloatTensor *b, FloatTensor *res) {
@@ -622,6 +631,9 @@ __host__ void launch_matmul(FloatTensor *a, FloatTensor *b, FloatTensor *res) {
       a->data_ptr(), b->data_ptr(), res->data_ptr(), a->shape_.data(),
       a->strides_.data(), a->offset_, b->shape_.data(), b->strides_.data(),
       b->offset_, a->dim_);
+
+  CUDA_CHECK(cudaGetLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 ContiguousTensor3d_Device to_ct3d(FloatTensor *x) {
