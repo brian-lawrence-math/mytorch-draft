@@ -48,6 +48,10 @@ struct FloatTensor {
   void base_and_reshape(std::vector<size_t> new_shape);
   void base_reshape_restride(std::vector<size_t> new_shape, size_t new_offset,
                              std::vector<ssize_t> new_strides);
+  FloatTensor view_raw(std::vector<size_t> new_shape,
+                                        size_t new_offset,
+                                        std::vector<ssize_t> new_strides);
+  FloatTensor view(std::vector<ssize_t> new_shape);
 
   Device dev_();
   FloatTensor clone();

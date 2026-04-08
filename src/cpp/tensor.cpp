@@ -113,8 +113,11 @@ template <typename T> std::string vector_to_string(std::vector<T> v) {
 }
 
 // ========================== Helper methods for indexing =====================
-size_t product(std::vector<size_t> vals) {
-  size_t cml_prod = 1;
+
+// product of a list of size_t or ssize_t
+template <typename T>
+T product(std::vector<T> vals) {
+  T cml_prod = 1;
   for (size_t val : vals) {
     cml_prod *= val;
   }
@@ -482,6 +485,70 @@ void FloatTensor::base_reshape_restride(std::vector<size_t> new_shape,
   this->offset_ = new_offset;
   this->strides_ = new_strides;
 }
+
+// Create a new FloatTensor with the same underlying block of memory as this
+// but specified shape, offset and strides.
+// Note that shape and strides of this are ignored.
+FloatTensor FloatTensor::view_raw(std::vector<size_t> new_shape,
+                                        size_t new_offset,
+                                        std::vector<ssize_t> new_strides) {
+	validate_shape_and_strides(this->block_->size, new_shape, new_offset,
+                             new_strides);
+
+  size_t new_dim = new_shape.size();
+
+  return FloatTensor{this->block_, new_dim, new_shape, new_offset, new_strides};
+}
+
+// Assuming this is a contiguous tensor,
+// returns a new contiguous tensor of the given shape.
+FloatTensor FloatTensor::view(std::vector<ssize_t> new_shape) {
+  if (! this->is_contiguous()) {
+    throw std::invalid_argument("Can only call view() on a contiguous tensor.  Consider reshape() instead.");
+  }
+ 
+  // If one entry of new_shape is -1, replace with the right value
+  // And at the same time validate new_shape: there should be at most one -1
+  size_t count = 0;
+  ssize_t idx = -1;
+  for (ssize_t i = 0; i++; i < new_shape.size()) {
+	  if (new_shape[i] <= 0) {
+		  if (new_shape[i] == -1) {
+			  count++;
+			  idx = i;
+		  } else {
+			  throw std::invalid_argument("Cannot assign a shape with negative or zero entries, except for the placeholder -1.");
+		  }
+	  }
+  }
+  if (count > 1) {
+	  throw std::invalid_argument("Cannot assign a shape with more than one placeholder -1.");
+  }
+
+  if (count == 1) {
+	  // new_shape includes -1 and all the other dims
+	ssize_t product_other_dims = - product(new_shape);
+	new_shape[idx] = this->block_->size / product_other_dims;
+  }
+
+  if (product(new_shape) != this->block_->size) {
+	  throw std::invalid_argument("Invalid shape: product of dimensions of new shape must match size of existing tensor.");
+  }
+
+  // ok now new_shape is validated, and if necessary -1 has been replaced with the correct dimension
+	
+  // convert to size_t
+  std::vector<size_t> new_shape_unsigned(new_shape.size());
+  for (ssize_t item : new_shape) {
+	  new_shape_unsigned.push_back(static_cast<size_t>(item));
+  }
+  size_t new_dim = new_shape.size();
+  size_t new_offset = 0;
+  std::vector<ssize_t> new_strides = reverse_cml_prod(new_shape_unsigned);
+
+  return FloatTensor{this->block_, new_dim, new_shape_unsigned, new_offset, new_strides};
+}
+
 
 // =================== Memory management ==========================
 Device FloatTensor::dev_() { return this->block_->dev; }

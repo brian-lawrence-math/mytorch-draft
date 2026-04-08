@@ -39,6 +39,7 @@ OTHER TODOS:
 - Views and reshaping:
 	- Allow creation of views by numpy-style indexing
 	- Allow general reshaping
+	- Clean up old reshaping functions
 - Additional operations:
 	- range
 	- DONE random
