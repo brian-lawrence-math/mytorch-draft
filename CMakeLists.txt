@@ -21,13 +21,16 @@ pybind11_add_module(_core MODULE src/cpp/tensor.cpp src/cpp/bindings.cpp src/cpp
 
 add_executable(bench src/cpp/tensor.cpp src/cpp/kernels.cu tests/cpp/bench_matmul.cpp)
 add_executable(debug src/cpp/tensor.cpp src/cpp/kernels.cu tests/cpp/debug_matmul.cpp)
+add_executable(test src/cpp/tensor.cpp src/cpp/kernels.cu tests/cpp/test_tensor.cpp)
 
 target_link_libraries(_core PRIVATE CUDA::cudart)
 target_link_libraries(bench PRIVATE CUDA::cudart)
 target_link_libraries(debug PRIVATE CUDA::cudart)
+target_link_libraries(test PRIVATE CUDA::cudart)
 target_link_libraries(_core PRIVATE CUDA::curand CUDA::cublas)
 target_link_libraries(bench PRIVATE CUDA::curand CUDA::cublas)
 target_link_libraries(debug PRIVATE CUDA::curand CUDA::cublas)
+target_link_libraries(test PRIVATE CUDA::curand CUDA::cublas)
 
 target_compile_options(debug PRIVATE
     -g $<$<COMPILE_LANGUAGE:CUDA>:-G>
@@ -45,8 +48,10 @@ set_target_properties(_core PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_D
 set_target_properties(_core PROPERTIES CUDA_ARCHITECTURES 86)
 set_target_properties(bench PROPERTIES CUDA_ARCHITECTURES 86)
 set_target_properties(debug PROPERTIES CUDA_ARCHITECTURES 86)
+set_target_properties(test PROPERTIES CUDA_ARCHITECTURES 86)
 
 target_include_directories(bench PRIVATE src/cpp)
 target_include_directories(debug PRIVATE src/cpp)
+target_include_directories(test PRIVATE src/cpp)
 
 install(TARGETS _core DESTINATION .)

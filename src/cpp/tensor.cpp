@@ -539,8 +539,8 @@ FloatTensor FloatTensor::view(std::vector<ssize_t> new_shape) {
 	
   // convert to size_t
   std::vector<size_t> new_shape_unsigned(new_shape.size());
-  for (ssize_t item : new_shape) {
-	  new_shape_unsigned.push_back(static_cast<size_t>(item));
+  for (size_t i = 0; i < new_shape.size(); i++) {
+	  new_shape_unsigned[i] = static_cast<size_t>(new_shape[i]);
   }
   size_t new_dim = new_shape.size();
   size_t new_offset = 0;
