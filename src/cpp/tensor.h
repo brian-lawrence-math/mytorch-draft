@@ -51,7 +51,7 @@ struct FloatTensor {
   FloatTensor view_raw(std::vector<size_t> new_shape,
                                         size_t new_offset,
                                         std::vector<ssize_t> new_strides);
-  void validate_new_shape(std::vector<ssize_t>& new_shape);
+  std::vector<size_t> validate_new_shape(std::vector<ssize_t> new_shape);
   FloatTensor view(std::vector<ssize_t> new_shape);
   FloatTensor reshape(std::vector<ssize_t> new_shape);
   FloatTensor contiguous_clone();
