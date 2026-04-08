@@ -500,15 +500,10 @@ FloatTensor FloatTensor::view_raw(std::vector<size_t> new_shape,
   return FloatTensor{this->block_, new_dim, new_shape, new_offset, new_strides};
 }
 
-// Assuming this is a contiguous tensor,
-// returns a new contiguous tensor of the given shape.
-FloatTensor FloatTensor::view(std::vector<ssize_t> new_shape) {
-  if (! this->is_contiguous()) {
-    throw std::invalid_argument("Can only call view() on a contiguous tensor.  Consider reshape() instead.");
-  }
- 
-  // If one entry of new_shape is -1, replace with the right value
-  // And at the same time validate new_shape: there should be at most one -1
+// Validate new_shape as an argument to this->view() or this->reshape()
+// If new_shape has a -1 as one of its entries, 
+// replace that -1 with a suitable value
+void FloatTensor::validate_new_shape(std::vector<ssize_t>& new_shape) {
   size_t count = 0;
   ssize_t idx = -1;
   for (ssize_t i = 0; i++; i < new_shape.size()) {
@@ -534,6 +529,18 @@ FloatTensor FloatTensor::view(std::vector<ssize_t> new_shape) {
   if (product(new_shape) != this->block_->size) {
 	  throw std::invalid_argument("Invalid shape: product of dimensions of new shape must match size of existing tensor.");
   }
+}
+
+// Assuming this is a contiguous tensor,
+// returns a new contiguous tensor of the given shape.
+FloatTensor FloatTensor::view(std::vector<ssize_t> new_shape) {
+  if (! this->is_contiguous()) {
+    throw std::invalid_argument("Can only call view() on a contiguous tensor.  Consider reshape() instead.");
+  }
+ 
+  // If one entry of new_shape is -1, replace with the right value
+  // And at the same time validate new_shape: there should be at most one -1
+  this->validate_new_shape(new_shape);
 
   // ok now new_shape is validated, and if necessary -1 has been replaced with the correct dimension
 	
@@ -549,6 +556,28 @@ FloatTensor FloatTensor::view(std::vector<ssize_t> new_shape) {
   return FloatTensor{this->block_, new_dim, new_shape_unsigned, new_offset, new_strides};
 }
 
+FloatTensor FloatTensor::reshape(std::vector<ssize_t> new_shape) {
+
+}
+
+
+FloatTensor FloatTensor::contiguous_clone() {
+  // allocate result
+  FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
+
+  if (this->dev_() == Device::GPU) {
+    launch_contiguous_clone(this, &result);
+  } else {
+    // generic CPU code
+    // just fill values one by one
+    for (size_t i = 0; i < this->numel(); i++) {
+      LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
+      float val = this->get_idx(log_idx);
+      result.set_idx(log_idx, val);
+    }
+  }
+  return result;
+}
 
 // =================== Memory management ==========================
 Device FloatTensor::dev_() { return this->block_->dev; }
