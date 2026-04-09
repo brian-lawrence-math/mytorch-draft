@@ -40,6 +40,7 @@ OTHER TODOS:
 	- Allow creation of views by numpy-style indexing
 	- Allow general reshaping
 	- Clean up old reshaping functions
+	- Very optional: smart pytorch-style reshape
 - Additional operations:
 	- range
 	- DONE random
@@ -52,4 +53,11 @@ NOTES:
 cuda-memcheck and valgrind
 bank conflicts and memory coalescing (4/32 bytes per sector)
 float4 and ldmatrix
+
+DIFFERENCES WITH PYTORCH:
+
+Most operations block on deviceSynchronize()
+Most operations not optimized
+reshape() always copies memory (pytorch creates a view when possible)
+expand() does not allow additional dimensions to be added
 

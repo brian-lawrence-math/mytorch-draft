@@ -559,6 +559,9 @@ FloatTensor FloatTensor::view(std::vector<ssize_t> new_shape) {
   return FloatTensor{this->block_, new_dim, new_shape_unsigned, new_offset, new_strides};
 }
 
+// Copy input data in contiguous order, and return a new tensor
+// with the input shape.
+// Note that this is different from pytorch, which returns a view if possible.
 FloatTensor FloatTensor::reshape(std::vector<ssize_t> new_shape) {
 	std::vector<size_t> new_shape_unsigned = this->validate_new_shape(new_shape);
 
@@ -594,6 +597,153 @@ FloatTensor FloatTensor::contiguous_clone() {
     }
   }
   return result;
+}
+
+FloatTensor FloatTensor::unsqueeze(ssize_t new_idx) {
+	if (new_idx < 0) {
+		new_idx += this->dim_ + 1;
+	}
+
+	if (new_idx < 0 || new_idx >= this->dim_) {
+		throw std::invalid_argument("Invalid dimension as input to unsqueeze().");
+	}
+
+	std::vector<size_t> new_shape(this->dim_ + 1);
+	std::vector<ssize_t> new_strides(this->dim_ + 1);
+
+	for (int i = 0; i < new_idx; i++) {
+		new_shape[i] = this->shape_[i];
+		new_strides[i] = this->strides_[i];
+	}
+
+	new_shape[new_idx] = 1;
+	// maintain contiguity: if the original tensor was contiguous,
+	// the unsqueezed tensor should be contiguous as well
+	new_strides[new_idx] = (new_idx == 0) ? product(this->shape_) : this->strides_[new_idx - 1];
+	for (int i = new_idx; i < this->dim_; i++) {
+		new_shape[i + 1] = this->shape_[i];
+		new_strides[i + 1] = this->strides_[i];
+	}
+
+	size_t new_offset = this->offset_;
+	size_t new_dim = this->dim_ + 1;
+
+	return FloatTensor{this->block_, new_dim, new_shape, new_offset, new_strides};
+}
+
+FloatTensor FloatTensor::squeeze(ssize_t idx) {
+	if (idx < 0) {
+		idx += this->dim_;
+	}
+
+	if (idx < 0 || idx >= this->dim_ || this->shape_[idx] != 1) {
+		throw std::invalid_argument("Invalid dimension as input to squeeze().");
+	}
+
+	std::vector<size_t> new_shape(this->dim_ - 1);
+	std::vector<ssize_t> new_strides(this->dim_ - 1);
+
+	for (size_t i = 0; i < idx; i++) {
+		new_shape[i] = this->shape_[i];
+		new_strides[i] = this->strides_[i];
+	}
+
+	for (size_t i = idx + 1; i < this->dim_; i++) {
+		new_shape[i - 1] = this->shape_[i];
+		new_strides[i - 1] = this->strides_[i];
+	}
+
+	size_t new_offset = this->offset_;
+	size_t new_dim = this->dim_ - 1;
+
+	return FloatTensor{this->block_, new_dim, new_shape, new_offset, new_strides};
+}
+
+// Return a new FloatTensor whose dimensions are permuted
+// Example: x has shape (10, 11, 12)
+// x.permute([1, 2, 0]) has shape (11, 12, 10)
+// This function returns a new view of the same underlying memory as this
+FloatTensor FloatTensor::permute(std::vector<ssize_t> dims) {
+	// Validate that dims is a permutation of range(dim_)
+	std::vector<bool> seen(this->dim_, false);
+	for (size_t idx = 0; idx < this->dim_; idx++) {
+		if (dims[idx] < 0) { dims[idx] += this->dim_; }
+		if (dims[idx] < 0 || dims[idx] >= this->dim_) {
+			throw std::invalid_argument("Dimension out of range");
+		}
+		seen[dims[idx]] = true;
+	}
+	for (size_t dim = 0; dim < this->dim_; dim++) {
+		if (!seen[dim]) {
+			throw std::invalid_argument("Dimensions input to permute() must be a permutation.");
+		}
+	}
+
+	// OK, now it's validated
+	std::vector<size_t> new_shape(this->dim_);
+	std::vector<ssize_t> new_strides(this->dim_);
+
+	for (size_t idx = 0; idx < this->dim_; idx++) {
+		new_shape[idx] = this->shape_[dims[idx]];
+		new_strides[idx] = this->strides_[dims[idx]];
+	}
+
+	return FloatTensor{this->block_, this->dim_, new_shape, this->offset_, new_strides};
+}
+
+// A special case of permute().
+// Returns a FloatTensor with dimensions i and j interchanged.
+// The return tensor is a new view of the same underlying memory as this.
+FloatTensor FloatTensor::transpose(ssize_t i, ssize_t j) {
+	if (i < 0) { i += this->dim_; }
+	if (j < 0) { j += this->dim_; }
+
+	if (i < 0 || i >= this->dim_ || j < 0 || j <= this->dim_) {
+		throw std::invalid_argument("Invalid dimensions input to transpose()");
+
+	std::vector<size_t> dims(this->dim_);
+
+	for (int k = 0; k < this->dim_; k++) {
+		dims[k] = k;
+	}
+	dims[i] = j;
+	dims[j] = i;
+
+	return this->permute(dims);
+}
+
+// Flatten dimensions from start_dim to end_dim, inclusive.
+// Unlike pytorch (but like numpy), flatten() always copies
+// the underlying data.
+FloatTensor FloatTensor::flatten(ssize_t start_dim, ssize_t end_dim) {
+	// This is going to be a simple wrapper around reshape().
+	// We just need to compute the new shape.
+	if (start_dim < 0) {start_dim += this->dim_;}
+	if (end_dim < 0) {end_dim += this->dim_;}
+
+	if (start_dim < 0 || start_dim >= this->dim_ || end_dim < 0 || end_dim >= this->dim_()) {
+		throw std::invalid_argument("Dimensions out of range in flatten().");
+	}
+
+	std::vector<ssize_t> shape(this->dim_ + start_dim - end_dim);
+
+	for(int i = 0; i < start_dim; i++) {
+		shape[i] = this->shape_[i];
+	}
+
+	shape[start_dim] = -1;
+
+	for(int i = end_dim + 1; i < this->dim_; i++) {
+		shape[i + start_dim - end_dim] = this->shape_[i];
+	}
+
+	return this->reshape(shape);
+}
+
+// If input is not contiguous, return a contiguous copy; otherwise, return input unchanged.
+FlaotTensor FloatTensor::contiguous() {
+	if (this->is_contiguous()) { return this; }
+	return this.contiguous_clone();
 }
 
 // =================== Memory management ==========================
