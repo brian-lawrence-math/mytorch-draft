@@ -61,6 +61,8 @@ struct FloatTensor {
   FloatTensor transpose(ssize_t i, ssize_t j);
   FloatTensor flatten(ssize_t start_dim, ssize_t end_dim);
   FloatTensor contiguous();
+  FloatTensor expand(std::vector<ssize_t> new_shape);
+  FloatTensor repeat(std::vector<size_t> n_repeats);
 
   Device dev_();
   FloatTensor clone();

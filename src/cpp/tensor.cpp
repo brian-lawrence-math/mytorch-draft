@@ -1,5 +1,6 @@
 #include <cuda_runtime.h>
 
+#include <cassert>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -749,6 +750,102 @@ FloatTensor FloatTensor::flatten(ssize_t start_dim, ssize_t end_dim) {
 FloatTensor FloatTensor::contiguous() {
 	if (this->is_contiguous()) { return *this; }
 	return this->contiguous_clone();
+}
+
+// Return a new view of input tensor with singleton dimensions expanded to larger size.
+// Argument 'new_shape' must have same length as input tensor dimension
+// (note: this is different from the pytorch API)
+// and must match input tensor dimension in all non-singleton dimensions.
+// A -1 in argument 'new_shape' will be replaced with the corresponding dimension 
+// of the input tensor.
+FloatTensor FloatTensor::expand(std::vector<ssize_t> new_shape) {
+	if (new_shape.size() != this->dim_) {
+		throw std::invalid_argument("In expand() new_shape must match the dimension of the original tensor.");
+	}
+
+	for (int idx = 0; idx < this->dim_; idx++){
+		if (new_shape[idx] == -1) { new_shape[idx] = this->shape_[idx]; }
+
+		if (new_shape[idx] != this->shape_[idx] && this->shape_[idx] != 1) {
+			throw std::invalid_argument("In expand() new_shape must agree with existing shape in all non-singleton dimensions.");
+		}
+	}
+
+	std::vector<ssize_t> new_strides(this->dim_);
+	std::vector<size_t> new_shape_unsigned(this->dim_);
+
+	for(int idx = 0; idx < this->dim_; idx++) {
+		if (this->shape_[idx] == 1 && new_shape[idx] > 1) {
+			new_strides[idx] = 0;
+		} else {
+			new_strides[idx] = this->strides_[idx];
+		}
+
+		new_shape_unsigned[idx] = static_cast<size_t>(new_shape[idx]);
+	}
+
+	return FloatTensor{this->block_, this->dim_, new_shape_unsigned, this->offset_, new_strides};
+}
+
+// Repeat the input tensor the given number of times along each dimension.
+// Input n_repeats is a list which must have at least this->dim_ entries.
+// If it has exactly this->dim_ entries, then
+// the output tensor will consist of copies of the input tensor,
+// repeated n_repeats[idx] times along the idx-th dimension.
+// If n_repeats has more than this->dim_ entries, then 
+// new dimensions will be prepended before existing dimensions.
+// Example: input tensor (10,), n_repeats = (2, 3) --> output shape (2, 30).
+//
+// In every case, repeat() creates a new copy in memory.
+FloatTensor FloatTensor::repeat(std::vector<size_t> n_repeats) {
+	// Temporary tensor object to carry shape and stride manipulations
+	FloatTensor x = *this;
+
+	if (n_repeats.size() < this->dim_) {
+		throw std::invalid_argument("Shape input to repeat() must have at least as many entries as dimension of the input tensor.");
+	}
+
+	// If there are extra entries in n_repeats, pad n_repeats
+	while (x.dim_ < n_repeats.size()) {
+		x = x.unsqueeze(0);
+	}
+
+	assert(x.dim_ == n_repeats.size());
+
+	// This is a convenient time to compute the output shape.
+	std::vector<ssize_t> output_shape(0);
+	for(size_t idx = 0; idx < n_repeats.size(); idx++) {
+		output_shape.push_back(x.shape_[idx] * n_repeats[idx]);
+	}
+
+	// prepare for an expand operation: create alternating singleton dimensions
+	// e.g. if x (d0, d1, d2), unsqueeze to (1, d0, 1, d1, 1, d2)
+	for(ssize_t idx = 0; idx < n_repeats.size(); idx++) {
+		x = x.unsqueeze(2 * idx);
+	}
+
+	// Prepare expand parameters
+	// For example, if n_repeats = (r0, r1, r2), then expand by (r0, -1, r1, -1, r2, -1)
+	std::vector<ssize_t> expand_shape(0);
+
+	for(size_t item: n_repeats) {
+		expand_shape.push_back(item);
+		expand_shape.push_back(-1);
+	}
+
+	// Call expand().
+	x = x.expand(expand_shape);
+
+	// Up to here no expensive copies happened,
+	// just some reshaping operations and copying of metadata.
+	// Now we copy.
+	x = x.contiguous_clone();
+
+	// At this point x is a contiguous tensor with shape (r0, d0, r1, d1, r2, d2).
+	// Finally reshape to get the output we want.
+	x = x.reshape(output_shape);
+
+	return x;
 }
 
 // =================== Memory management ==========================
