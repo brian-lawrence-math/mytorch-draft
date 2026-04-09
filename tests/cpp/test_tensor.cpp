@@ -388,6 +388,158 @@ void test_reshape_rejects_invalid_numel(Device dev) {
 	assert(threw);
 }
 
+void test_unsqueeze_preserves_values_and_aliasing(Device dev) {
+	FloatTensor source = make_sequential_tensor({2, 3}, dev);
+	FloatTensor expanded_front = source.unsqueeze(0);
+	FloatTensor expanded_back = source.unsqueeze(-1);
+
+	assert(expanded_front.dim_ == 3);
+	assert(expanded_front.shape_ == std::vector<size_t>({1, 2, 3}));
+	assert(expanded_front.block_ == source.block_);
+	ASSERT_ALMOST_EQUAL(expanded_front.get_idx(LogicalIndex{{0, 1, 2}}),
+	                    source.get_idx(LogicalIndex{{1, 2}}));
+
+	expanded_front.set_idx(LogicalIndex{{0, 1, 2}}, 99.0f);
+	ASSERT_ALMOST_EQUAL(source.get_idx(LogicalIndex{{1, 2}}), 99.0f);
+
+	assert(expanded_back.dim_ == 3);
+	assert(expanded_back.shape_ == std::vector<size_t>({2, 3, 1}));
+	assert(expanded_back.block_ == source.block_);
+	ASSERT_ALMOST_EQUAL(expanded_back.get_idx(LogicalIndex{{1, 2, 0}}),
+	                    source.get_idx(LogicalIndex{{1, 2}}));
+}
+
+void test_unsqueeze_preserves_contiguity(Device dev) {
+	FloatTensor source = make_sequential_tensor({2, 3, 4}, dev);
+	FloatTensor front = source.unsqueeze(0);
+	FloatTensor middle = source.unsqueeze(1);
+	FloatTensor back = source.unsqueeze(-1);
+
+	assert(source.is_contiguous());
+	assert(front.is_contiguous());
+	assert(middle.is_contiguous());
+	assert(back.is_contiguous());
+
+	assert(front.shape_ == std::vector<size_t>({1, 2, 3, 4}));
+	assert(middle.shape_ == std::vector<size_t>({2, 1, 3, 4}));
+	assert(back.shape_ == std::vector<size_t>({2, 3, 4, 1}));
+}
+
+void test_squeeze_preserves_values_and_aliasing(Device dev) {
+	FloatTensor source = make_sequential_tensor({2, 3}, dev).unsqueeze(1);
+	FloatTensor squeezed = source.squeeze(1);
+	FloatTensor squeezed_negative = source.squeeze(-2);
+
+	assert(squeezed.dim_ == 2);
+	assert(squeezed.shape_ == std::vector<size_t>({2, 3}));
+	assert(squeezed.block_ == source.block_);
+	ASSERT_ALMOST_EQUAL(squeezed.get_idx(LogicalIndex{{1, 2}}),
+	                    source.get_idx(LogicalIndex{{1, 0, 2}}));
+
+	squeezed.set_idx(LogicalIndex{{1, 2}}, 77.0f);
+	ASSERT_ALMOST_EQUAL(source.get_idx(LogicalIndex{{1, 0, 2}}), 77.0f);
+
+	assert(squeezed_negative.shape_ == std::vector<size_t>({2, 3}));
+	ASSERT_ALMOST_EQUAL(squeezed_negative.get_idx(LogicalIndex{{1, 2}}), 77.0f);
+}
+
+void test_squeeze_rejects_nonunit_dim(Device dev) {
+	FloatTensor source = make_sequential_tensor({2, 3}, dev);
+	bool threw = false;
+	try {
+		source.squeeze(1);
+	} catch (const std::invalid_argument&) {
+		threw = true;
+	}
+	assert(threw);
+}
+
+void test_permute_reorders_axes_and_preserves_aliasing(Device dev) {
+	FloatTensor source = make_sequential_tensor({3, 4, 5}, dev);
+	FloatTensor permuted = source.permute({1, 2, 0});
+	FloatTensor permuted_negative = source.permute({-2, -1, -3});
+
+	assert(permuted.shape_ == std::vector<size_t>({4, 5, 3}));
+	assert(permuted.block_ == source.block_);
+	ASSERT_ALMOST_EQUAL(permuted.get_idx(LogicalIndex{{1, 2, 0}}),
+	                    source.get_idx(LogicalIndex{{0, 1, 2}}));
+
+	permuted.set_idx(LogicalIndex{{1, 2, 0}}, 123.0f);
+	ASSERT_ALMOST_EQUAL(source.get_idx(LogicalIndex{{0, 1, 2}}), 123.0f);
+
+	assert(permuted_negative.shape_ == std::vector<size_t>({4, 5, 3}));
+	ASSERT_ALMOST_EQUAL(permuted_negative.get_idx(LogicalIndex{{1, 2, 0}}), 123.0f);
+}
+
+void test_transpose_swaps_axes_and_preserves_aliasing(Device dev) {
+	FloatTensor source = make_sequential_tensor({2, 3, 4}, dev);
+	FloatTensor transposed = source.transpose(0, 2);
+	FloatTensor transposed_negative = source.transpose(-1, -3);
+
+	assert(transposed.shape_ == std::vector<size_t>({4, 3, 2}));
+	assert(transposed.block_ == source.block_);
+	ASSERT_ALMOST_EQUAL(transposed.get_idx(LogicalIndex{{3, 1, 1}}),
+	                    source.get_idx(LogicalIndex{{1, 1, 3}}));
+
+	transposed.set_idx(LogicalIndex{{3, 1, 1}}, 456.0f);
+	ASSERT_ALMOST_EQUAL(source.get_idx(LogicalIndex{{1, 1, 3}}), 456.0f);
+
+	assert(transposed_negative.shape_ == std::vector<size_t>({4, 3, 2}));
+	ASSERT_ALMOST_EQUAL(transposed_negative.get_idx(LogicalIndex{{3, 1, 1}}), 456.0f);
+}
+
+void test_flatten_merges_dims_and_preserves_values(Device dev) {
+	FloatTensor source = make_sequential_tensor({2, 3, 4}, dev);
+	FloatTensor flattened = source.flatten(1, 2);
+
+	assert(flattened.shape_ == std::vector<size_t>({2, 12}));
+	assert(flattened.is_contiguous());
+	ASSERT_ALMOST_EQUAL(flattened.get_idx(LogicalIndex{{1, 6}}),
+	                    source.get_idx(LogicalIndex{{1, 1, 2}}));
+	assert_raw_values(flattened, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f,
+	                            7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f,
+	                            13.0f, 14.0f, 15.0f, 16.0f, 17.0f, 18.0f,
+	                            19.0f, 20.0f, 21.0f, 22.0f, 23.0f, 24.0f});
+}
+
+void test_flatten_noncontiguous_matches_contiguous_order(Device dev) {
+	FloatTensor source = make_noncontiguous_tensor(dev).unsqueeze(0);
+	FloatTensor flattened = source.flatten(0, 1);
+
+	assert(flattened.shape_ == std::vector<size_t>({3, 4}));
+	assert(flattened.is_contiguous());
+	assert_raw_values(flattened, {1.0f, 4.0f, 7.0f, 10.0f,
+	                            2.0f, 5.0f, 8.0f, 11.0f,
+	                            3.0f, 6.0f, 9.0f, 12.0f});
+}
+
+void test_contiguous_returns_self_for_contiguous_tensor(Device dev) {
+	FloatTensor source = make_sequential_tensor({2, 3}, dev);
+	FloatTensor contiguous = source.contiguous();
+
+	assert(contiguous.shape_ == source.shape_);
+	assert(contiguous.block_ == source.block_);
+	ASSERT_ALMOST_EQUAL(contiguous.get_idx(LogicalIndex{{1, 2}}),
+	                    source.get_idx(LogicalIndex{{1, 2}}));
+
+	contiguous.set_idx(LogicalIndex{{1, 2}}, 321.0f);
+	ASSERT_ALMOST_EQUAL(source.get_idx(LogicalIndex{{1, 2}}), 321.0f);
+}
+
+void test_contiguous_clones_noncontiguous_tensor(Device dev) {
+	FloatTensor source = make_noncontiguous_tensor(dev);
+	FloatTensor contiguous = source.contiguous();
+
+	assert(contiguous.shape_ == source.shape_);
+	assert(contiguous.is_contiguous());
+	assert(contiguous.block_ != source.block_);
+	assert_same_logical_values(source, contiguous);
+
+	contiguous.set_idx(LogicalIndex{{1, 2}}, 654.0f);
+	ASSERT_ALMOST_EQUAL(source.get_idx(LogicalIndex{{1, 2}}), 8.0f);
+	ASSERT_ALMOST_EQUAL(contiguous.get_idx(LogicalIndex{{1, 2}}), 654.0f);
+}
+
 void run_layout_tests(Device dev) {
 	test_contiguous_clone_preserves_shape_and_values(dev);
 	test_contiguous_clone_breaks_aliasing(dev);
@@ -397,6 +549,16 @@ void run_layout_tests(Device dev) {
 	test_reshape_rejects_multiple_negative_one(dev);
 	test_reshape_rejects_zero_and_negative_dims(dev);
 	test_reshape_rejects_invalid_numel(dev);
+	test_unsqueeze_preserves_values_and_aliasing(dev);
+	test_unsqueeze_preserves_contiguity(dev);
+	test_squeeze_preserves_values_and_aliasing(dev);
+	test_squeeze_rejects_nonunit_dim(dev);
+	test_permute_reorders_axes_and_preserves_aliasing(dev);
+	test_transpose_swaps_axes_and_preserves_aliasing(dev);
+	test_flatten_merges_dims_and_preserves_values(dev);
+	test_flatten_noncontiguous_matches_contiguous_order(dev);
+	test_contiguous_returns_self_for_contiguous_tensor(dev);
+	test_contiguous_clones_noncontiguous_tensor(dev);
 }
 
 int main() {

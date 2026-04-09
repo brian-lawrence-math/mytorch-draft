@@ -139,7 +139,7 @@ std::vector<ssize_t> reverse_cml_prod(std::vector<size_t> vals) {
 LogicalIndex flat_idx_to_idx(const FlatLogicalIndex &idx,
                              std::vector<size_t> shape) {
   size_t flat_idx = idx.idx;
-  if (flat_idx > product(shape)) {
+  if (flat_idx >= product(shape)) {
     throw std::out_of_range("Index into tensor out of range.");
   }
 
@@ -524,10 +524,10 @@ std::vector<size_t> FloatTensor::validate_new_shape(std::vector<ssize_t> new_sha
   if (count == 1) {
 	  // new_shape includes -1 and all the other dims
 	ssize_t product_other_dims = - product(new_shape);
-	new_shape[idx] = this->block_->size / product_other_dims;
+	new_shape[idx] = this->numel() / product_other_dims;
   }
 
-  if (product(new_shape) != this->block_->size) {
+  if (product(new_shape) != this->numel()) {
 	  throw std::invalid_argument("Invalid shape: product of dimensions of new shape must match size of existing tensor.");
   }
 
@@ -553,6 +553,7 @@ FloatTensor FloatTensor::view(std::vector<ssize_t> new_shape) {
 	
   // convert to size_t
   size_t new_dim = new_shape.size();
+  // note that this->offset == 0 is guaranteed by this->is_contiguous()
   size_t new_offset = 0;
   std::vector<ssize_t> new_strides = reverse_cml_prod(new_shape_unsigned);
 
@@ -604,7 +605,7 @@ FloatTensor FloatTensor::unsqueeze(ssize_t new_idx) {
 		new_idx += this->dim_ + 1;
 	}
 
-	if (new_idx < 0 || new_idx >= this->dim_) {
+	if (new_idx < 0 || new_idx > this->dim_) {
 		throw std::invalid_argument("Invalid dimension as input to unsqueeze().");
 	}
 
@@ -664,6 +665,9 @@ FloatTensor FloatTensor::squeeze(ssize_t idx) {
 // x.permute([1, 2, 0]) has shape (11, 12, 10)
 // This function returns a new view of the same underlying memory as this
 FloatTensor FloatTensor::permute(std::vector<ssize_t> dims) {
+	if (dims.size() != this->dim_) {
+		throw std::invalid_argument("Dimensions input to permute() must be a permutation.");
+	}
 	// Validate that dims is a permutation of range(dim_)
 	std::vector<bool> seen(this->dim_, false);
 	for (size_t idx = 0; idx < this->dim_; idx++) {
@@ -698,10 +702,11 @@ FloatTensor FloatTensor::transpose(ssize_t i, ssize_t j) {
 	if (i < 0) { i += this->dim_; }
 	if (j < 0) { j += this->dim_; }
 
-	if (i < 0 || i >= this->dim_ || j < 0 || j <= this->dim_) {
+	if (i < 0 || i >= this->dim_ || j < 0 || j >= this->dim_) {
 		throw std::invalid_argument("Invalid dimensions input to transpose()");
+	}
 
-	std::vector<size_t> dims(this->dim_);
+	std::vector<ssize_t> dims(this->dim_);
 
 	for (int k = 0; k < this->dim_; k++) {
 		dims[k] = k;
@@ -721,7 +726,7 @@ FloatTensor FloatTensor::flatten(ssize_t start_dim, ssize_t end_dim) {
 	if (start_dim < 0) {start_dim += this->dim_;}
 	if (end_dim < 0) {end_dim += this->dim_;}
 
-	if (start_dim < 0 || start_dim >= this->dim_ || end_dim < 0 || end_dim >= this->dim_()) {
+	if (start_dim < 0 || start_dim >= this->dim_ || end_dim < 0 || end_dim >= this->dim_ || end_dim < start_dim) {
 		throw std::invalid_argument("Dimensions out of range in flatten().");
 	}
 
@@ -741,9 +746,9 @@ FloatTensor FloatTensor::flatten(ssize_t start_dim, ssize_t end_dim) {
 }
 
 // If input is not contiguous, return a contiguous copy; otherwise, return input unchanged.
-FlaotTensor FloatTensor::contiguous() {
-	if (this->is_contiguous()) { return this; }
-	return this.contiguous_clone();
+FloatTensor FloatTensor::contiguous() {
+	if (this->is_contiguous()) { return *this; }
+	return this->contiguous_clone();
 }
 
 // =================== Memory management ==========================

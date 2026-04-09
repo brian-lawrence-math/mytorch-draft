@@ -55,6 +55,12 @@ struct FloatTensor {
   FloatTensor view(std::vector<ssize_t> new_shape);
   FloatTensor reshape(std::vector<ssize_t> new_shape);
   FloatTensor contiguous_clone();
+  FloatTensor unsqueeze(ssize_t new_idx);
+  FloatTensor squeeze(ssize_t idx);
+  FloatTensor permute(std::vector<ssize_t> dims);
+  FloatTensor transpose(ssize_t i, ssize_t j);
+  FloatTensor flatten(ssize_t start_dim, ssize_t end_dim);
+  FloatTensor contiguous();
 
   Device dev_();
   FloatTensor clone();
