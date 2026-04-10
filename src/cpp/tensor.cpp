@@ -765,6 +765,10 @@ FloatTensor FloatTensor::expand(std::vector<ssize_t> new_shape) {
 
 	for (int idx = 0; idx < this->dim_; idx++){
 		if (new_shape[idx] == -1) { new_shape[idx] = this->shape_[idx]; }
+		
+		if (new_shape[idx] <= 0) {
+			throw std::invalid_argument("Invalid shape input to expand().");
+		}
 
 		if (new_shape[idx] != this->shape_[idx] && this->shape_[idx] != 1) {
 			throw std::invalid_argument("In expand() new_shape must agree with existing shape in all non-singleton dimensions.");

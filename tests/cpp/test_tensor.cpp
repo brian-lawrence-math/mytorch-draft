@@ -346,6 +346,22 @@ void test_reshape_infers_negative_one(Device dev) {
 	                            3.0f, 6.0f, 9.0f, 12.0f});
 }
 
+void test_reshape_always_copies_even_for_contiguous_tensor(Device dev) {
+	FloatTensor source = make_sequential_tensor({2, 3}, dev);
+	FloatTensor reshaped = source.reshape({1, 6});
+
+	assert(reshaped.shape_ == std::vector<size_t>({1, 6}));
+	assert(reshaped.is_contiguous());
+	assert(reshaped.block_ != source.block_);
+	assert(reshaped.data_ptr() != source.data_ptr());
+	ASSERT_ALMOST_EQUAL(reshaped.get_idx(LogicalIndex{{0, 4}}),
+	                    source.get_idx(LogicalIndex{{1, 1}}));
+
+	reshaped.set_idx(LogicalIndex{{0, 4}}, 4321.0f);
+	ASSERT_ALMOST_EQUAL(source.get_idx(LogicalIndex{{1, 1}}), 5.0f);
+	ASSERT_ALMOST_EQUAL(reshaped.get_idx(LogicalIndex{{0, 4}}), 4321.0f);
+}
+
 void test_reshape_rejects_multiple_negative_one(Device dev) {
 	FloatTensor base = make_sequential_tensor({3, 4}, dev);
 	bool threw = false;
@@ -386,6 +402,75 @@ void test_reshape_rejects_invalid_numel(Device dev) {
 		threw = true;
 	}
 	assert(threw);
+}
+
+void test_expand_preserves_aliasing_and_uses_broadcast_strides(Device dev) {
+	FloatTensor source = make_sequential_tensor({2, 1, 3}, dev);
+	FloatTensor expanded = source.expand({2, 4, -1});
+
+	assert(expanded.shape_ == std::vector<size_t>({2, 4, 3}));
+	assert(expanded.block_ == source.block_);
+	assert(expanded.strides_ == std::vector<ssize_t>({3, 0, 1}));
+	ASSERT_ALMOST_EQUAL(expanded.get_idx(LogicalIndex{{1, 0, 2}}), 6.0f);
+	ASSERT_ALMOST_EQUAL(expanded.get_idx(LogicalIndex{{1, 3, 2}}), 6.0f);
+
+	expanded.set_idx(LogicalIndex{{1, 2, 1}}, 99.0f);
+	ASSERT_ALMOST_EQUAL(source.get_idx(LogicalIndex{{1, 0, 1}}), 99.0f);
+	ASSERT_ALMOST_EQUAL(expanded.get_idx(LogicalIndex{{1, 0, 1}}), 99.0f);
+	ASSERT_ALMOST_EQUAL(expanded.get_idx(LogicalIndex{{1, 3, 1}}), 99.0f);
+}
+
+void test_expand_noop_keeps_existing_strides(Device dev) {
+	FloatTensor source = make_noncontiguous_tensor(dev);
+	FloatTensor expanded = source.expand({-1, 4});
+
+	assert(expanded.shape_ == source.shape_);
+	assert(expanded.strides_ == source.strides_);
+	assert(expanded.block_ == source.block_);
+	ASSERT_ALMOST_EQUAL(expanded.get_idx(LogicalIndex{{2, 1}}),
+	                    source.get_idx(LogicalIndex{{2, 1}}));
+}
+
+void test_expand_rejects_rank_mismatch(Device dev) {
+	FloatTensor source = make_sequential_tensor({2, 1, 3}, dev);
+	bool threw = false;
+	try {
+		source.expand({2, 3});
+	} catch (const std::invalid_argument&) {
+		threw = true;
+	}
+	assert(threw);
+}
+
+void test_expand_rejects_non_singleton_dimension_change(Device dev) {
+	FloatTensor source = make_sequential_tensor({2, 1, 3}, dev);
+	bool threw = false;
+	try {
+		source.expand({3, 4, 3});
+	} catch (const std::invalid_argument&) {
+		threw = true;
+	}
+	assert(threw);
+}
+
+void test_expand_rejects_invalid_non_placeholder_negative_dims(Device dev) {
+	FloatTensor source = make_sequential_tensor({2, 1, 3}, dev);
+
+	bool threw_zero = false;
+	try {
+		source.expand({2, 0, 3});
+	} catch (const std::invalid_argument&) {
+		threw_zero = true;
+	}
+	assert(threw_zero);
+
+	bool threw_negative = false;
+	try {
+		source.expand({2, -2, 3});
+	} catch (const std::invalid_argument&) {
+		threw_negative = true;
+	}
+	assert(threw_negative);
 }
 
 void test_unsqueeze_preserves_values_and_aliasing(Device dev) {
@@ -546,9 +631,15 @@ void run_layout_tests(Device dev) {
 	test_reshape_contiguous_matches_flat_order(dev);
 	test_reshape_noncontiguous_matches_contiguous_clone_then_reshape(dev);
 	test_reshape_infers_negative_one(dev);
+	test_reshape_always_copies_even_for_contiguous_tensor(dev);
 	test_reshape_rejects_multiple_negative_one(dev);
 	test_reshape_rejects_zero_and_negative_dims(dev);
 	test_reshape_rejects_invalid_numel(dev);
+	test_expand_preserves_aliasing_and_uses_broadcast_strides(dev);
+	test_expand_noop_keeps_existing_strides(dev);
+	test_expand_rejects_rank_mismatch(dev);
+	test_expand_rejects_non_singleton_dimension_change(dev);
+	test_expand_rejects_invalid_non_placeholder_negative_dims(dev);
 	test_unsqueeze_preserves_values_and_aliasing(dev);
 	test_unsqueeze_preserves_contiguity(dev);
 	test_squeeze_preserves_values_and_aliasing(dev);
