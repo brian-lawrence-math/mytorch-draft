@@ -119,6 +119,22 @@ __global__ void contiguous_clone(float *tensor_a, float *tensor_res,
   return;
 }
 
+__global__ void view_assign(float *tensor_a, float *tensor_b, size_t *shape,
+		ssize_t *a_strides, size_t a_offset, ssize_t *b_strides, size_t b_offset,
+		size_t dim) {
+	size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+  size_t num_entries = product_device(shape, dim);
+
+  if (idx < num_entries) {
+	  size_t a_idx = flat_idx_to_raw_idx_device(idx, shape, a_strides, a_offset, dim);
+	  size_t b_idx = flat_idx_to_raw_idx_device(idx, shape, b_strides, b_offset, dim);
+
+	  tensor_a[a_idx] = tensor_b[b_idx];
+  }
+  return;
+}
+
 __global__ void add(float *tensor_a, float *tensor_b, float *tensor_res,
                     size_t *shape, ssize_t *a_strides, size_t a_offset,
                     ssize_t *b_strides, size_t b_offset, size_t dim) {
@@ -560,6 +576,21 @@ __host__ void launch_contiguous_clone(FloatTensor *a, FloatTensor *res) {
 
   CUDA_CHECK(cudaGetLastError());
   CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+__host__ void launch_view_assign(FloatTensor *a, FloatTensor *b) {
+  size_t num_entries = a->numel();
+  size_t n_blocks, threads_per_block;
+  if (num_entries < TARGET_THREADS_PER_BLOCK) {
+    n_blocks = 1;
+    threads_per_block = num_entries;
+  } else {
+    n_blocks =
+        (num_entries + TARGET_THREADS_PER_BLOCK - 1) / TARGET_THREADS_PER_BLOCK;
+    threads_per_block = TARGET_THREADS_PER_BLOCK;
+  }
+  view_assign<<<n_blocks, threads_per_block>>>(a->data_ptr(), b->data_ptr(),
+      a->shape_.data(), a->strides_.data(), a->offset_, b->strides_.data(), b->offset_, a->dim_);
 }
 
 __host__ void launch_add(FloatTensor *a, FloatTensor *b, FloatTensor *res) {

@@ -930,6 +930,31 @@ bool FloatTensor::is_eq(FloatTensor &other) {
   }
 }
 
+// this[:] = other[:]
+// Input two tensors (which may be views into memory).
+// Copies values from other into this.
+// Note that this results in undefined behavior if multiple indices of a
+// point to the same underlying position in memory.
+// Like Pytorch, we guard against this only in a special case.
+void FloatTensor::view_assign(FloatTensor &other) {
+	validate_same_shape(other);
+
+	for(int idx = 0; idx < this->dim_; idx++) {
+		if (this->strides_[idx] == 0 && this->shape_[idx] != 1) {
+			throw std::invalid_argument("Cannot call view_assign on tensor with strides of zero.");
+		}
+	}
+
+	if (this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
+		launch_view_assign(this, &other);
+	} else {
+		for (size_t i = 0; i < this->numel(); i++) {
+		  LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
+		  this.set_idx(log_idx, other.get_idx(log_idx));
+		}
+	}
+}
+
 FloatTensor FloatTensor::add(FloatTensor &other) {
   validate_same_shape(other);
 
