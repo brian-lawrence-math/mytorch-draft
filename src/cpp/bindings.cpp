@@ -21,7 +21,8 @@ PYBIND11_MODULE(_core, mytorch, py::mod_gil_not_used()) {
       .def_readonly("shape", &FloatTensor::shape_)
       .def_readonly("offset", &FloatTensor::offset_)
       .def_readonly("strides", &FloatTensor::strides_)
-      .def("zeros_1d", &FloatTensor::zeros_1d)
+      .def("zeros_1d", &FloatTensor::zeros_1d) // can probably delete
+	  .def("zeros", &FloatTensor::zeros)
       .def("from_list", &FloatTensor::from_list_1d)
       .def("randn", &FloatTensor::randn)
       .def("__repr__", &FloatTensor::raw_repr)

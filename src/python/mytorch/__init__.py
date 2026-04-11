@@ -131,6 +131,44 @@ class FloatTensor:
 	def repeat(self, n_repeats):
 		return FloatTensor(self._base.repeat(n_repeats))
 
+	@classmethod
+	def cat(cls, tensors: list[FloatTensor], dim=0):
+		assert len(tensors) > 0, "cat() needs at least one tensor to concatenate!"
+
+		new_len = 0
+
+		for tensor in tensors:
+			assert tensor.dim == tensors[0].dim, "All tensors in cat() must have same dimension"
+			for idx in range(tensors[0].dim):
+				assert idx == dim or tensor.shape[idx] == tensors[0].shape[idx], (
+						"All tensors in cat() must have same shape along non-concatenated dimensions"
+						)
+			new_len += tensor.shape[dim]
+
+		new_shape = tensors[0].shape.copy()
+		new_shape[dim] = new_len
+
+		result = FloatTensor.zeros(new_shape, tensors[0].device)
+
+		# "Row" is not the best word, "row_idx" means the index along the concatenated dimension
+		row_idx = 0
+		view_idx_slices = [slice(None, None, None) for _ in range(tensors[0].dim)]
+		for tensor in tensors:
+			# find the tuple of slices to describe the view where tensor will get inserted
+			n_rows_this_tensor = tensor.shape[dim]
+			rows_slice = slice(row_idx, row_idx + n_rows_this_tensor, None)
+			view_idx_slices[dim] = rows_slice
+			
+			# great, now we can make the assignment
+			result[tuple(view_idx_slices)] = tensor
+
+			row_idx += n_rows_this_tensor
+
+		# woohoo, all done
+		return result
+
+
+
 	def add(self, other):
 		return FloatTensor(self._base.add(other._base))
 
