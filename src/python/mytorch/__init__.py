@@ -84,13 +84,15 @@ class FloatTensor:
 
 
 	def __setitem__(self, key, val):
-		if isinstance(key, int):
-			key = [key]
-		if all(isinstance(item, int) for item in key):
+		if isinstance(key, int) or isinstance(key, slice):
+			key = (key,)
+		if all(isinstance(item, int) for item in key) and len(key) == self.dim:
 			self._setitem(key, val)
-		else:
-			print(f"Called __setitem__ on {key}")
-			raise NotImplementedError
+			return
+		# use __getitem__ to get the view
+		temp_view = self.__getitem__(key)
+		# then make the assignment
+		temp_view.view_assign(val)
 
 	def clone(self):
 		return FloatTensor(self._base.clone())
