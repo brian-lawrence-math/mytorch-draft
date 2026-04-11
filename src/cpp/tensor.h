@@ -84,7 +84,7 @@ struct FloatTensor {
   FloatTensor matmul_cublas(FloatTensor &other);
   FloatTensor matmul_tiled_2(FloatTensor &other);
 
-  FloatTensor transpose();
+  FloatTensor transpose_special_case();
 };
 
 #endif

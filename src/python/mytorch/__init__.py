@@ -28,15 +28,70 @@ class FloatTensor:
 	def __repr__(self):
 		return repr(self._base)
 
+	# Supports both single-entry indexing (e.g. x[3, 2])
+	# and range-based indexing (e.g. x[:, 2:3]).
+	# Range-based indexing returns a view of self.
 	def __getitem__(self, key):
 		if isinstance(key, int):
 			key = [key]
-		return self._getitem(key)
+		if all(isinstance(item, int) for item in key):
+			return self._getitem(key)
+		else:
+			print(f"Called __getitem__ on {key}")
+		# key should be a list of ints and slice objects
+		assert isinstance(key, list), "Key must be a list of ints and slice objects"
+
+		if len(key) > self.dim:
+			raise ValueError("Index into tensor cannot be longer than dimension of tensor.")
+		# build inputs to indexed_view
+		singleton = []
+		shape = []
+		rel_offsets = []
+		rel_strides = []
+
+		for idx, item in enumerate(key):
+			if isinstance(item, int):
+				singleton.append(True)
+				shape.append(1)
+				rel_offsets.append(item)
+				rel_strides.append(0)
+			elif isinstance(item, slice):
+				singleton.append(False)
+
+				# compute shape, offset, stride
+				this_shape = len(range(*item.indices(self.shape[idx])))
+				this_offset = item.start
+				this_stride = item.step
+
+				shape.append(this_shape)
+				rel_offsets.append(this_offset)
+				rel_strides.append(this_stride)
+
+			else:
+				raise NotImplementedError("Key must be a list of ints and slice objects.")
+
+		assert len(singleton) == len(shape) == len(rel_offsets) == len(rel_strides)
+
+		# if index only includes some dims, view the full dim for remaining dims
+		while len(singleton) < self.dim:
+			idx += 1     # idx is still in scope
+			singleton.append(False)
+			shape.append(self.shape[idx])
+			rel_offsets.append(0)
+			rel_strides.append(1)
+
+		return FloatTensor(self._base.indexed_view(singleton, shape, rel_offsets, rel_strides))
+				
+
 
 	def __setitem__(self, key, val):
 		if isinstance(key, int):
 			key = [key]
-		self._setitem(key, val)
+		if all(isinstance(item, int) for item in key):
+			self._setitem(key, val)
+		else:
+			print(f"Called __getitem__ on {key}")
+			raise NotImplementedError
 
 	def clone(self):
 		return FloatTensor(self._base.clone())
@@ -62,7 +117,11 @@ class FloatTensor:
 	def transpose(self, i, j):
 		return FloatTensor(self._base.transpose(i, j))
 
-	def flatten(self, start_dim=0, end_dim=self.dim-1):
+	def flatten(self, start_dim=None, end_dim=None):
+		if start_dim is None:
+			start_dim = 0
+		if end_dim is None:
+			end_dim = self.dim - 1
 		return FloatTensor(self._base.flatten(start_dim, end_dim))
 
 	def expand(self, new_shape):

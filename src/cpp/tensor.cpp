@@ -1233,7 +1233,11 @@ FloatTensor FloatTensor::matmul_tiled_2(FloatTensor &other) {
   }
 }
 
-FloatTensor FloatTensor::transpose() {
+// Special-case kernel for transpose, assuming input tensor:
+// - dimension 3
+// - contiguous
+// - want to transpose last two dimensions
+FloatTensor FloatTensor::transpose_special_case() {
 	if (!this->is_contiguous() || this->dim_ != 3) {
 		throw std::invalid_argument("Function transpose() requires contiguous 3d argument.");
 	}

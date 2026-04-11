@@ -72,7 +72,7 @@ void bench_transpose() {
 	cudaDeviceSynchronize();
 
 	auto start = std::chrono::steady_clock::now();
-	FloatTensor t2 = t1.transpose();
+	FloatTensor t2 = t1.transpose_special_case();
 	cudaDeviceSynchronize();
 	auto stop = std::chrono::steady_clock::now();
 	std::chrono::duration<double> elapsed = stop - start;
