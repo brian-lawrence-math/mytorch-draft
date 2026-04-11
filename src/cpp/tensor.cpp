@@ -1025,6 +1025,10 @@ void FloatTensor::view_assign(FloatTensor &other) {
 		}
 	}
 
+	if (this->dev_() != other.dev_()) {
+		throw std::invalid_argument("Copying data between tensors on different devices not permitted.  Move tensors to same device first.");
+	}
+
 	if (this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
 		launch_view_assign(this, &other);
 	} else {

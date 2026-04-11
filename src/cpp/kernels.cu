@@ -591,6 +591,9 @@ __host__ void launch_view_assign(FloatTensor *a, FloatTensor *b) {
   }
   view_assign<<<n_blocks, threads_per_block>>>(a->data_ptr(), b->data_ptr(),
       a->shape_.data(), a->strides_.data(), a->offset_, b->strides_.data(), b->offset_, a->dim_);
+
+  CUDA_CHECK(cudaGetLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 __host__ void launch_add(FloatTensor *a, FloatTensor *b, FloatTensor *res) {

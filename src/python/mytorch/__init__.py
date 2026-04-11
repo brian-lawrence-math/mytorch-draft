@@ -12,6 +12,8 @@ class FloatTensor:
 
 	@classmethod
 	def zeros(cls, shape: list, dev: Device):
+		if isinstance(shape, int):
+			shape = (shape,)
 		return cls(_FloatTensor.zeros(shape, dev))
 
 	@classmethod
@@ -20,6 +22,8 @@ class FloatTensor:
 
 	@classmethod
 	def randn(cls, shape, dev: Device):
+		if isinstance(shape, int):
+			shape = (shape,)
 		return cls(_FloatTensor.randn(shape, dev))
 
 	def __eq__(self, other):
@@ -137,6 +141,11 @@ class FloatTensor:
 
 		new_len = 0
 
+		if dim < 0:
+			dim += tensors[0].dim
+		if dim < 0 or dim >= tensors[0].dim:
+			raise ValueError("Dimension out of range.")
+
 		for tensor in tensors:
 			assert tensor.dim == tensors[0].dim, "All tensors in cat() must have same dimension"
 			for idx in range(tensors[0].dim):
@@ -144,6 +153,7 @@ class FloatTensor:
 						"All tensors in cat() must have same shape along non-concatenated dimensions"
 						)
 			new_len += tensor.shape[dim]
+
 
 		new_shape = tensors[0].shape.copy()
 		new_shape[dim] = new_len
@@ -167,7 +177,11 @@ class FloatTensor:
 		# woohoo, all done
 		return result
 
-
+	@classmethod
+	def stack(cls, tensors: list[FloatTensor], dim=0):
+		# Hack: stack() is just unsqueeze() all the tensors, followed by cat().
+		unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors]
+		return FloatTensor.cat(unsqueezed_tensors, dim)
 
 	def add(self, other):
 		return FloatTensor(self._base.add(other._base))
