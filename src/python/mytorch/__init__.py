@@ -32,14 +32,12 @@ class FloatTensor:
 	# and range-based indexing (e.g. x[:, 2:3]).
 	# Range-based indexing returns a view of self.
 	def __getitem__(self, key):
-		if isinstance(key, int):
-			key = [key]
-		if all(isinstance(item, int) for item in key):
+		if isinstance(key, int) or isinstance(key, slice):
+			key = (key,)
+		if all(isinstance(item, int) for item in key) and len(key) == self.dim:
 			return self._getitem(key)
-		else:
-			print(f"Called __getitem__ on {key}")
 		# key should be a list of ints and slice objects
-		assert isinstance(key, list), "Key must be a list of ints and slice objects"
+		assert isinstance(key, tuple), "Key must be a tuple of ints and slice objects"
 
 		if len(key) > self.dim:
 			raise ValueError("Index into tensor cannot be longer than dimension of tensor.")
@@ -59,9 +57,10 @@ class FloatTensor:
 				singleton.append(False)
 
 				# compute shape, offset, stride
-				this_shape = len(range(*item.indices(self.shape[idx])))
-				this_offset = item.start
-				this_stride = item.step
+				item_indices = item.indices(self.shape[idx])
+				this_shape = len(range(*item_indices))
+				this_offset = item_indices[0]
+				this_stride = item_indices[2]
 
 				shape.append(this_shape)
 				rel_offsets.append(this_offset)
@@ -90,7 +89,7 @@ class FloatTensor:
 		if all(isinstance(item, int) for item in key):
 			self._setitem(key, val)
 		else:
-			print(f"Called __getitem__ on {key}")
+			print(f"Called __setitem__ on {key}")
 			raise NotImplementedError
 
 	def clone(self):
