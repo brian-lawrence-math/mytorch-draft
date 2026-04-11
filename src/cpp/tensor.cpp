@@ -582,6 +582,86 @@ FloatTensor FloatTensor::reshape(std::vector<ssize_t> new_shape) {
 	return result;
 }
 
+// Use indexing to create a view of an existing tensor.
+// x[6]
+// x[7, 2:4, 4:1:-1]
+// Args:
+//   Each arg is a vector of length this->dim_.
+//   The idx-th entry of each arg specifies what happens to the idx-th dim.
+//   - singleton[idx]: If 'true', then the index requested is a single value, not a range...
+//       so this dimension will not appear as a dimension in the output view.
+//       In this case: shape[idx] must equal 1, rel_offsets[idx] gives the index requested,
+//       and rel_strides[idx] is ignored.
+//     If singleton[idx] is 'false', then the index requested is a range,
+//       and it will appear as an output dimension.
+//   - shape[idx]: The size of the output tensor along the dimension corresponding to idx
+//   - rel_offsets[idx], rel_strides[idx]: Offset and stride of output tensor along dim idx
+// Examples:
+// x[6]     (x.dim_ = 1):
+//   singleton = {true}
+//   shape = {1}
+//   rel_offsets = {6}
+//   (rel_strides irrelevant)
+//   output tensor shape: {}
+// x[7, 2:3, 4:1:-1]
+//   singleton = {true, false, false}
+//   shape = {1, 1, 3}
+//   rel_offsets = {7, 2, 4}
+//   rel_strides = {irrelevant, 1, -1}
+FloatTensor FloatTensor::indexed_view(std::vector<bool> singleton, std::vector<size_t> shape, std::vector<size_t> rel_offsets, std::vector<ssize_t> rel_strides) {
+	// validate inputs
+	if (singleton.size() != this->dim_ || shape.size() != this->dim_ || rel_offsets.size() != this->dim_ || rel_strides.size() != this->dim_) {
+		throw std::invalid_argument("All inputs to indexed_view must match dimension of input tensor.");
+	}
+
+	// more validation
+	// in particular, check that no index goes out of bounds
+	for (int idx = 0; idx < this->dim_; idx++) {
+		if (rel_offsets[idx] < 0) {
+			rel_offsets[idx] += this->shape_[idx];
+		}
+
+		if (singleton[idx]) {
+			// check all parameters valid
+			if (shape[idx] != 1) {
+				throw std::invalid_argument("Shape in singleton dimension must equal 1.");
+			}
+			// check the index is not out of bounds
+			if (rel_offsets[idx] < 0 || rel_offsets[idx] >= this->shape_[idx]) {
+				throw std::invalid_argument("Singleton index out of bounds.");
+			}
+		} else {
+			// simple validation
+			if (shape[idx] == 0) {
+				throw std::invalid_argument("Zero shape not allowed!");
+			}
+			// now check the first and last indices are in bounds
+			ssize_t start_idx = static_cast<ssize_t>(rel_offsets[idx]);
+			ssize_t end_idx = start_idx + (static_cast<ssize_t>(shape[idx]) - 1) * rel_strides[idx];
+			if (start_idx < 0 || start_idx >= this->shape_[idx] || end_idx < 0 || end_idx >= this->shape_[idx]) {
+				throw std::invalid_argument("Range out of bounds.");
+			}
+		}
+	}
+
+	// great, now we know it's valid and we just need to construct the new view
+	size_t new_dim = 0;
+	std::vector<size_t> new_shape{};
+	size_t new_offset = this->offset_;
+	std::vector<ssize_t> new_strides{};
+
+	for (int idx = 0; idx < this->dim_; idx++) {
+		new_offset += rel_offsets[idx] * this->strides_[idx];
+		// only add a dim to the output vector if it's not a singleton
+		if (! singleton[idx]) {
+			new_dim++;
+			new_shape.push_back(shape[idx]);
+			new_strides.push_back(rel_strides[idx] * this->strides_[idx]);
+		}
+	}
+	
+	return FloatTensor{this->block_, new_dim, new_shape, new_offset, new_strides};
+}
 
 FloatTensor FloatTensor::contiguous_clone() {
   // allocate result
@@ -950,7 +1030,7 @@ void FloatTensor::view_assign(FloatTensor &other) {
 	} else {
 		for (size_t i = 0; i < this->numel(); i++) {
 		  LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
-		  this.set_idx(log_idx, other.get_idx(log_idx));
+		  this->set_idx(log_idx, other.get_idx(log_idx));
 		}
 	}
 }

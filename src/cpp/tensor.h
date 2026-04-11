@@ -54,6 +54,7 @@ struct FloatTensor {
   std::vector<size_t> validate_new_shape(std::vector<ssize_t> new_shape);
   FloatTensor view(std::vector<ssize_t> new_shape);
   FloatTensor reshape(std::vector<ssize_t> new_shape);
+  FloatTensor indexed_view(std::vector<bool> singleton, std::vector<size_t> shape, std::vector<size_t> rel_offsets, std::vector<ssize_t> rel_strides);
   FloatTensor contiguous_clone();
   FloatTensor unsqueeze(ssize_t new_idx);
   FloatTensor squeeze(ssize_t idx);
@@ -71,6 +72,7 @@ struct FloatTensor {
   void validate_same_shape(const FloatTensor &other);
   std::vector<size_t> validate_matmul_shape(const FloatTensor &other);
   bool is_eq(FloatTensor &other);
+  void view_assign(FloatTensor &other);
   FloatTensor add(FloatTensor &other);
   FloatTensor sub(FloatTensor &other);
   FloatTensor mul(FloatTensor &other);
