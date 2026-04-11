@@ -41,6 +41,36 @@ class FloatTensor:
 	def clone(self):
 		return FloatTensor(self._base.clone())
 
+	def view(self, shape):
+		return FloatTensor(self._base.view(shape))
+
+	def reshape(self, shape):
+		return FloatTensor(self._base.reshape(shape))
+
+	def contiguous(self):
+		return FloatTensor(self._base.contiguous())
+
+	def unsqueeze(self, idx):
+		return FloatTensor(self._base.unsqueeze(idx))
+
+	def squeeze(self, idx):
+		return FloatTensor(self._base.squeeze(idx))
+
+	def permute(self, dims):
+		return FloatTensor(self._base.permute(dims))
+
+	def transpose(self, i, j):
+		return FloatTensor(self._base.transpose(i, j))
+
+	def flatten(self, start_dim=0, end_dim=self.dim-1):
+		return FloatTensor(self._base.flatten(start_dim, end_dim))
+
+	def expand(self, new_shape):
+		return FloatTensor(self._base.expand(new_shape))
+
+	def repeat(self, n_repeats):
+		return FloatTensor(self._base.repeat(n_repeats))
+
 	def add(self, other):
 		return FloatTensor(self._base.add(other._base))
 
