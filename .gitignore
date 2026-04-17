@@ -10,3 +10,6 @@ wheels/
 .venv
 *.so
 test_tensor
+
+# Artifacts from a random experiment I did on my computer
+.hashback2
