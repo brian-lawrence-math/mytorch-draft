@@ -14,7 +14,7 @@ What this is not:
   - Optimization tools (optimizers and learning rate schedulers).
 
 How to run:
-'''
+```
 $ cmake -S . -B build
 $ cmake --build build
 $ export PYTHONPATH="src/python"
@@ -25,7 +25,7 @@ $ uv run python
 Tensor:
   Shape: [5], Offset: 0, Strides: [1]
   Raw data: [1.358244, -0.330076, -0.618854, -1.219036, 0.150899]
-'''
+```
 
 ## Optimization
 
