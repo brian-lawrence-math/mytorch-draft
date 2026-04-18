@@ -13,3 +13,7 @@ test_tensor
 
 # Artifacts from a random experiment I did on my computer
 .hashback2
+
+# More directories to ignore
+benches/
+ncu/

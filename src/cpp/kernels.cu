@@ -9,6 +9,7 @@
 
 #include "tensor.h"
 #include "cuda_utils.h"
+#include "utils.cuh"
 
 // Hard-coded constant specific to the RTX 3050
 #define MAX_THREADS_PER_BLOCK (1024)
@@ -45,29 +46,6 @@ static_assert((TPB_ROW % 32 == 0));
 #define MAX_SHARED_FLOATS_PER_BLOCK (12288)
 static_assert((TPB_ROW * TILE_ROWS + TPB_COL * TILE_COLS) * MUL_LOOP_TO_LOAD <=
               MAX_SHARED_FLOATS_PER_BLOCK);
-
-// ========================== Helper methods for indexing =====================
-// Modified from tensor.cpp to run on device (i.e. no vectors)
-__device__ size_t product_device(size_t *vals, size_t n) {
-  size_t cml_prod = 1;
-  for (size_t i = 0; i < n; i++) {
-    cml_prod *= vals[i];
-  }
-  return cml_prod;
-}
-
-// shape is an array size_t[dim]
-// strides is another array size_t[dim] of the same size
-__device__ size_t flat_idx_to_raw_idx_device(size_t flat_idx, size_t *shape,
-                                             ssize_t *strides, size_t offset,
-                                             size_t dim) {
-  ssize_t result = offset;
-  for (size_t d = dim; d-- > 0;) {
-    result += (flat_idx % shape[d]) * strides[d];
-    flat_idx /= shape[d];
-  }
-  return (size_t)result;
-}
 
 // =================== Special-case kernels for contiguous tensors ==========
 __global__ void add_contiguous(float *a, float *b, float *res, size_t len) {
