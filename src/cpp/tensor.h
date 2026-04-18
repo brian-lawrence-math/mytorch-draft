@@ -48,13 +48,15 @@ struct FloatTensor {
   void base_and_reshape(std::vector<size_t> new_shape);
   void base_reshape_restride(std::vector<size_t> new_shape, size_t new_offset,
                              std::vector<ssize_t> new_strides);
-  FloatTensor view_raw(std::vector<size_t> new_shape,
-                                        size_t new_offset,
-                                        std::vector<ssize_t> new_strides);
+  FloatTensor view_raw(std::vector<size_t> new_shape, size_t new_offset,
+                       std::vector<ssize_t> new_strides);
   std::vector<size_t> validate_new_shape(std::vector<ssize_t> new_shape);
   FloatTensor view(std::vector<ssize_t> new_shape);
   FloatTensor reshape(std::vector<ssize_t> new_shape);
-  FloatTensor indexed_view(std::vector<bool> singleton, std::vector<size_t> shape, std::vector<size_t> rel_offsets, std::vector<ssize_t> rel_strides);
+  FloatTensor indexed_view(std::vector<bool> singleton,
+                           std::vector<size_t> shape,
+                           std::vector<size_t> rel_offsets,
+                           std::vector<ssize_t> rel_strides);
   FloatTensor contiguous_clone();
   FloatTensor unsqueeze(ssize_t new_idx);
   FloatTensor squeeze(ssize_t idx);
@@ -85,6 +87,13 @@ struct FloatTensor {
   FloatTensor matmul_tiled_2(FloatTensor &other);
 
   FloatTensor transpose_special_case();
+
+  template <typename Func> FloatTensor pointwise_op(FloatTensor &result, Func f);
+  FloatTensor abs();
+  FloatTensor exp();
+  FloatTensor log();
+  FloatTensor sqrt();
+  FloatTensor relu();
 };
 
 #endif

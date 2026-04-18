@@ -1,0 +1,15 @@
+# Optimizing matrix multiplication on an RTX 3050
+
+I'm doing some experiments to see how fast I can perform a batched matrix
+multiplication on two 32-bit float tensors of shape (100, 1000, 1000) on an RTX 3050 GPU.
+
+## Baseline analysis
+
+The RTX 3050 has 18 streaming multiprocessors with 128 cores each, for a total of 2304 cores.
+
+6.774 TFLOPS
+
+(L1 cache: 128 KB per SM.  L2 cache: 2 MB total.)
+
+The batched matrix multiplication is equivalent to 100 matrix multiplications,
+each multiplying 

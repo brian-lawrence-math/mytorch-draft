@@ -21,4 +21,3 @@ __device__ size_t flat_idx_to_raw_idx_device(size_t flat_idx, size_t *shape,
   }
   return (size_t)result;
 }
-

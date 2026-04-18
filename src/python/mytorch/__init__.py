@@ -212,3 +212,19 @@ class FloatTensor:
 
 	def __matmul__(self, other):
 		return self.matmul(other)
+
+	def abs(self):
+		return FloatTensor(self._base.abs())
+
+	def exp(self):
+		return FloatTensor(self._base.exp())
+
+	def log(self):
+		return FloatTensor(self._base.log())
+
+	def sqrt(self):
+		return FloatTensor(self._base.sqrt())
+
+	def relu(self):
+		return FloatTensor(self._base.relu())
+

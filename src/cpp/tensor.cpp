@@ -1,19 +1,20 @@
 #include <cuda_runtime.h>
 
 #include <cassert>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
-#include <chrono>
 #include <iostream>
 #include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-#include "tensor.h"
 #include "cuda_utils.h"
 #include "kernels.cuh"
+#include "pointwise.cuh"
+#include "tensor.h"
 
 // ======================== Memory management ========================
 float *alloc_float(size_t n, Device dev) {
@@ -116,8 +117,7 @@ template <typename T> std::string vector_to_string(std::vector<T> v) {
 // ========================== Helper methods for indexing =====================
 
 // product of a list of size_t or ssize_t
-template <typename T>
-T product(std::vector<T> vals) {
+template <typename T> T product(std::vector<T> vals) {
   T cml_prod = 1;
   for (size_t val : vals) {
     cml_prod *= val;
@@ -491,9 +491,9 @@ void FloatTensor::base_reshape_restride(std::vector<size_t> new_shape,
 // but specified shape, offset and strides.
 // Note that shape and strides of this are ignored.
 FloatTensor FloatTensor::view_raw(std::vector<size_t> new_shape,
-                                        size_t new_offset,
-                                        std::vector<ssize_t> new_strides) {
-	validate_shape_and_strides(this->block_->size, new_shape, new_offset,
+                                  size_t new_offset,
+                                  std::vector<ssize_t> new_strides) {
+  validate_shape_and_strides(this->block_->size, new_shape, new_offset,
                              new_strides);
 
   size_t new_dim = new_shape.size();
@@ -502,39 +502,45 @@ FloatTensor FloatTensor::view_raw(std::vector<size_t> new_shape,
 }
 
 // Validate new_shape as an argument to this->view() or this->reshape().
-// If new_shape has a -1 as one of its entries, 
+// If new_shape has a -1 as one of its entries,
 // replace that -1 with a suitable value.
-// The input is signed (because -1 can be sent as a placeholder); the output is unsigned
-std::vector<size_t> FloatTensor::validate_new_shape(std::vector<ssize_t> new_shape) {
+// The input is signed (because -1 can be sent as a placeholder); the output is
+// unsigned
+std::vector<size_t>
+FloatTensor::validate_new_shape(std::vector<ssize_t> new_shape) {
   size_t count = 0;
   ssize_t idx = -1;
   for (ssize_t i = 0; i < new_shape.size(); i++) {
-	  if (new_shape[i] <= 0) {
-		  if (new_shape[i] == -1) {
-			  count++;
-			  idx = i;
-		  } else {
-			  throw std::invalid_argument("Cannot assign a shape with negative or zero entries, except for the placeholder -1.");
-		  }
-	  }
+    if (new_shape[i] <= 0) {
+      if (new_shape[i] == -1) {
+        count++;
+        idx = i;
+      } else {
+        throw std::invalid_argument(
+            "Cannot assign a shape with negative or zero entries, except for "
+            "the placeholder -1.");
+      }
+    }
   }
   if (count > 1) {
-	  throw std::invalid_argument("Cannot assign a shape with more than one placeholder -1.");
+    throw std::invalid_argument(
+        "Cannot assign a shape with more than one placeholder -1.");
   }
 
   if (count == 1) {
-	  // new_shape includes -1 and all the other dims
-	ssize_t product_other_dims = - product(new_shape);
-	new_shape[idx] = this->numel() / product_other_dims;
+    // new_shape includes -1 and all the other dims
+    ssize_t product_other_dims = -product(new_shape);
+    new_shape[idx] = this->numel() / product_other_dims;
   }
 
   if (product(new_shape) != this->numel()) {
-	  throw std::invalid_argument("Invalid shape: product of dimensions of new shape must match size of existing tensor.");
+    throw std::invalid_argument("Invalid shape: product of dimensions of new "
+                                "shape must match size of existing tensor.");
   }
 
   std::vector<size_t> new_shape_unsigned(new_shape.size());
   for (size_t i = 0; i < new_shape.size(); i++) {
-	  new_shape_unsigned[i] = static_cast<size_t>(new_shape[i]);
+    new_shape_unsigned[i] = static_cast<size_t>(new_shape[i]);
   }
   return new_shape_unsigned;
 }
@@ -542,44 +548,50 @@ std::vector<size_t> FloatTensor::validate_new_shape(std::vector<ssize_t> new_sha
 // Assuming this is a contiguous tensor,
 // returns a new contiguous tensor of the given shape.
 FloatTensor FloatTensor::view(std::vector<ssize_t> new_shape) {
-  if (! this->is_contiguous()) {
-    throw std::invalid_argument("Can only call view() on a contiguous tensor.  Consider reshape() instead.");
+  if (!this->is_contiguous()) {
+    throw std::invalid_argument("Can only call view() on a contiguous tensor.  "
+                                "Consider reshape() instead.");
   }
- 
+
   // If one entry of new_shape is -1, replace with the right value
   // And at the same time validate new_shape: there should be at most one -1
   std::vector<size_t> new_shape_unsigned = this->validate_new_shape(new_shape);
 
-  // ok now new_shape is validated, and if necessary -1 has been replaced with the correct dimension
-	
+  // ok now new_shape is validated, and if necessary -1 has been replaced with
+  // the correct dimension
+
   // convert to size_t
   size_t new_dim = new_shape.size();
   // note that this->offset == 0 is guaranteed by this->is_contiguous()
   size_t new_offset = 0;
   std::vector<ssize_t> new_strides = reverse_cml_prod(new_shape_unsigned);
 
-  return FloatTensor{this->block_, new_dim, new_shape_unsigned, new_offset, new_strides};
+  return FloatTensor{this->block_, new_dim, new_shape_unsigned, new_offset,
+                     new_strides};
 }
 
 // Copy input data in contiguous order, and return a new tensor
 // with the input shape.
 // Note that this is different from pytorch, which returns a view if possible.
 FloatTensor FloatTensor::reshape(std::vector<ssize_t> new_shape) {
-	std::vector<size_t> new_shape_unsigned = this->validate_new_shape(new_shape);
+  std::vector<size_t> new_shape_unsigned = this->validate_new_shape(new_shape);
 
-	FloatTensor result = FloatTensor::uninitialized(new_shape_unsigned, this->dev_());
+  FloatTensor result =
+      FloatTensor::uninitialized(new_shape_unsigned, this->dev_());
 
-	if (this->dev_() == Device::GPU) {
-		launch_contiguous_clone(this, &result);
-	} else {
-		for (size_t i = 0; i < this->numel(); i++) {
-			LogicalIndex this_log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
-			LogicalIndex other_log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, result.shape_);
-			float val = this->get_idx(this_log_idx);
-			result.set_idx(other_log_idx, val);
-		}
-	}
-	return result;
+  if (this->dev_() == Device::GPU) {
+    launch_contiguous_clone(this, &result);
+  } else {
+    for (size_t i = 0; i < this->numel(); i++) {
+      LogicalIndex this_log_idx =
+          flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
+      LogicalIndex other_log_idx =
+          flat_idx_to_idx(FlatLogicalIndex{i}, result.shape_);
+      float val = this->get_idx(this_log_idx);
+      result.set_idx(other_log_idx, val);
+    }
+  }
+  return result;
 }
 
 // Use indexing to create a view of an existing tensor.
@@ -588,14 +600,17 @@ FloatTensor FloatTensor::reshape(std::vector<ssize_t> new_shape) {
 // Args:
 //   Each arg is a vector of length this->dim_.
 //   The idx-th entry of each arg specifies what happens to the idx-th dim.
-//   - singleton[idx]: If 'true', then the index requested is a single value, not a range...
+//   - singleton[idx]: If 'true', then the index requested is a single value,
+//   not a range...
 //       so this dimension will not appear as a dimension in the output view.
-//       In this case: shape[idx] must equal 1, rel_offsets[idx] gives the index requested,
-//       and rel_strides[idx] is ignored.
+//       In this case: shape[idx] must equal 1, rel_offsets[idx] gives the index
+//       requested, and rel_strides[idx] is ignored.
 //     If singleton[idx] is 'false', then the index requested is a range,
 //       and it will appear as an output dimension.
-//   - shape[idx]: The size of the output tensor along the dimension corresponding to idx
-//   - rel_offsets[idx], rel_strides[idx]: Offset and stride of output tensor along dim idx
+//   - shape[idx]: The size of the output tensor along the dimension
+//   corresponding to idx
+//   - rel_offsets[idx], rel_strides[idx]: Offset and stride of output tensor
+//   along dim idx
 // Examples:
 // x[6]     (x.dim_ = 1):
 //   singleton = {true}
@@ -608,59 +623,67 @@ FloatTensor FloatTensor::reshape(std::vector<ssize_t> new_shape) {
 //   shape = {1, 1, 3}
 //   rel_offsets = {7, 2, 4}
 //   rel_strides = {irrelevant, 1, -1}
-FloatTensor FloatTensor::indexed_view(std::vector<bool> singleton, std::vector<size_t> shape, std::vector<size_t> rel_offsets, std::vector<ssize_t> rel_strides) {
-	// validate inputs
-	if (singleton.size() != this->dim_ || shape.size() != this->dim_ || rel_offsets.size() != this->dim_ || rel_strides.size() != this->dim_) {
-		throw std::invalid_argument("All inputs to indexed_view must match dimension of input tensor.");
-	}
+FloatTensor FloatTensor::indexed_view(std::vector<bool> singleton,
+                                      std::vector<size_t> shape,
+                                      std::vector<size_t> rel_offsets,
+                                      std::vector<ssize_t> rel_strides) {
+  // validate inputs
+  if (singleton.size() != this->dim_ || shape.size() != this->dim_ ||
+      rel_offsets.size() != this->dim_ || rel_strides.size() != this->dim_) {
+    throw std::invalid_argument(
+        "All inputs to indexed_view must match dimension of input tensor.");
+  }
 
-	// more validation
-	// in particular, check that no index goes out of bounds
-	for (int idx = 0; idx < this->dim_; idx++) {
-		if (rel_offsets[idx] < 0) {
-			rel_offsets[idx] += this->shape_[idx];
-		}
+  // more validation
+  // in particular, check that no index goes out of bounds
+  for (int idx = 0; idx < this->dim_; idx++) {
+    if (rel_offsets[idx] < 0) {
+      rel_offsets[idx] += this->shape_[idx];
+    }
 
-		if (singleton[idx]) {
-			// check all parameters valid
-			if (shape[idx] != 1) {
-				throw std::invalid_argument("Shape in singleton dimension must equal 1.");
-			}
-			// check the index is not out of bounds
-			if (rel_offsets[idx] < 0 || rel_offsets[idx] >= this->shape_[idx]) {
-				throw std::invalid_argument("Singleton index out of bounds.");
-			}
-		} else {
-			// simple validation
-			if (shape[idx] == 0) {
-				throw std::invalid_argument("Zero shape not allowed!");
-			}
-			// now check the first and last indices are in bounds
-			ssize_t start_idx = static_cast<ssize_t>(rel_offsets[idx]);
-			ssize_t end_idx = start_idx + (static_cast<ssize_t>(shape[idx]) - 1) * rel_strides[idx];
-			if (start_idx < 0 || start_idx >= this->shape_[idx] || end_idx < 0 || end_idx >= this->shape_[idx]) {
-				throw std::invalid_argument("Range out of bounds.");
-			}
-		}
-	}
+    if (singleton[idx]) {
+      // check all parameters valid
+      if (shape[idx] != 1) {
+        throw std::invalid_argument(
+            "Shape in singleton dimension must equal 1.");
+      }
+      // check the index is not out of bounds
+      if (rel_offsets[idx] < 0 || rel_offsets[idx] >= this->shape_[idx]) {
+        throw std::invalid_argument("Singleton index out of bounds.");
+      }
+    } else {
+      // simple validation
+      if (shape[idx] == 0) {
+        throw std::invalid_argument("Zero shape not allowed!");
+      }
+      // now check the first and last indices are in bounds
+      ssize_t start_idx = static_cast<ssize_t>(rel_offsets[idx]);
+      ssize_t end_idx =
+          start_idx + (static_cast<ssize_t>(shape[idx]) - 1) * rel_strides[idx];
+      if (start_idx < 0 || start_idx >= this->shape_[idx] || end_idx < 0 ||
+          end_idx >= this->shape_[idx]) {
+        throw std::invalid_argument("Range out of bounds.");
+      }
+    }
+  }
 
-	// great, now we know it's valid and we just need to construct the new view
-	size_t new_dim = 0;
-	std::vector<size_t> new_shape{};
-	size_t new_offset = this->offset_;
-	std::vector<ssize_t> new_strides{};
+  // great, now we know it's valid and we just need to construct the new view
+  size_t new_dim = 0;
+  std::vector<size_t> new_shape{};
+  size_t new_offset = this->offset_;
+  std::vector<ssize_t> new_strides{};
 
-	for (int idx = 0; idx < this->dim_; idx++) {
-		new_offset += rel_offsets[idx] * this->strides_[idx];
-		// only add a dim to the output vector if it's not a singleton
-		if (! singleton[idx]) {
-			new_dim++;
-			new_shape.push_back(shape[idx]);
-			new_strides.push_back(rel_strides[idx] * this->strides_[idx]);
-		}
-	}
-	
-	return FloatTensor{this->block_, new_dim, new_shape, new_offset, new_strides};
+  for (int idx = 0; idx < this->dim_; idx++) {
+    new_offset += rel_offsets[idx] * this->strides_[idx];
+    // only add a dim to the output vector if it's not a singleton
+    if (!singleton[idx]) {
+      new_dim++;
+      new_shape.push_back(shape[idx]);
+      new_strides.push_back(rel_strides[idx] * this->strides_[idx]);
+    }
+  }
+
+  return FloatTensor{this->block_, new_dim, new_shape, new_offset, new_strides};
 }
 
 FloatTensor FloatTensor::contiguous_clone() {
@@ -682,63 +705,64 @@ FloatTensor FloatTensor::contiguous_clone() {
 }
 
 FloatTensor FloatTensor::unsqueeze(ssize_t new_idx) {
-	if (new_idx < 0) {
-		new_idx += this->dim_ + 1;
-	}
+  if (new_idx < 0) {
+    new_idx += this->dim_ + 1;
+  }
 
-	if (new_idx < 0 || new_idx > this->dim_) {
-		throw std::invalid_argument("Invalid dimension as input to unsqueeze().");
-	}
+  if (new_idx < 0 || new_idx > this->dim_) {
+    throw std::invalid_argument("Invalid dimension as input to unsqueeze().");
+  }
 
-	std::vector<size_t> new_shape(this->dim_ + 1);
-	std::vector<ssize_t> new_strides(this->dim_ + 1);
+  std::vector<size_t> new_shape(this->dim_ + 1);
+  std::vector<ssize_t> new_strides(this->dim_ + 1);
 
-	for (int i = 0; i < new_idx; i++) {
-		new_shape[i] = this->shape_[i];
-		new_strides[i] = this->strides_[i];
-	}
+  for (int i = 0; i < new_idx; i++) {
+    new_shape[i] = this->shape_[i];
+    new_strides[i] = this->strides_[i];
+  }
 
-	new_shape[new_idx] = 1;
-	// maintain contiguity: if the original tensor was contiguous,
-	// the unsqueezed tensor should be contiguous as well
-	new_strides[new_idx] = (new_idx == 0) ? product(this->shape_) : this->strides_[new_idx - 1];
-	for (int i = new_idx; i < this->dim_; i++) {
-		new_shape[i + 1] = this->shape_[i];
-		new_strides[i + 1] = this->strides_[i];
-	}
+  new_shape[new_idx] = 1;
+  // maintain contiguity: if the original tensor was contiguous,
+  // the unsqueezed tensor should be contiguous as well
+  new_strides[new_idx] =
+      (new_idx == 0) ? product(this->shape_) : this->strides_[new_idx - 1];
+  for (int i = new_idx; i < this->dim_; i++) {
+    new_shape[i + 1] = this->shape_[i];
+    new_strides[i + 1] = this->strides_[i];
+  }
 
-	size_t new_offset = this->offset_;
-	size_t new_dim = this->dim_ + 1;
+  size_t new_offset = this->offset_;
+  size_t new_dim = this->dim_ + 1;
 
-	return FloatTensor{this->block_, new_dim, new_shape, new_offset, new_strides};
+  return FloatTensor{this->block_, new_dim, new_shape, new_offset, new_strides};
 }
 
 FloatTensor FloatTensor::squeeze(ssize_t idx) {
-	if (idx < 0) {
-		idx += this->dim_;
-	}
+  if (idx < 0) {
+    idx += this->dim_;
+  }
 
-	if (idx < 0 || idx >= this->dim_ || this->shape_[idx] != 1) {
-		throw std::invalid_argument("Invalid dimension as input to squeeze().");
-	}
+  if (idx < 0 || idx >= this->dim_ || this->shape_[idx] != 1) {
+    throw std::invalid_argument("Invalid dimension as input to squeeze().");
+  }
 
-	std::vector<size_t> new_shape(this->dim_ - 1);
-	std::vector<ssize_t> new_strides(this->dim_ - 1);
+  std::vector<size_t> new_shape(this->dim_ - 1);
+  std::vector<ssize_t> new_strides(this->dim_ - 1);
 
-	for (size_t i = 0; i < idx; i++) {
-		new_shape[i] = this->shape_[i];
-		new_strides[i] = this->strides_[i];
-	}
+  for (size_t i = 0; i < idx; i++) {
+    new_shape[i] = this->shape_[i];
+    new_strides[i] = this->strides_[i];
+  }
 
-	for (size_t i = idx + 1; i < this->dim_; i++) {
-		new_shape[i - 1] = this->shape_[i];
-		new_strides[i - 1] = this->strides_[i];
-	}
+  for (size_t i = idx + 1; i < this->dim_; i++) {
+    new_shape[i - 1] = this->shape_[i];
+    new_strides[i - 1] = this->strides_[i];
+  }
 
-	size_t new_offset = this->offset_;
-	size_t new_dim = this->dim_ - 1;
+  size_t new_offset = this->offset_;
+  size_t new_dim = this->dim_ - 1;
 
-	return FloatTensor{this->block_, new_dim, new_shape, new_offset, new_strides};
+  return FloatTensor{this->block_, new_dim, new_shape, new_offset, new_strides};
 }
 
 // Return a new FloatTensor whose dimensions are permuted
@@ -746,129 +770,152 @@ FloatTensor FloatTensor::squeeze(ssize_t idx) {
 // x.permute([1, 2, 0]) has shape (11, 12, 10)
 // This function returns a new view of the same underlying memory as this
 FloatTensor FloatTensor::permute(std::vector<ssize_t> dims) {
-	if (dims.size() != this->dim_) {
-		throw std::invalid_argument("Dimensions input to permute() must be a permutation.");
-	}
-	// Validate that dims is a permutation of range(dim_)
-	std::vector<bool> seen(this->dim_, false);
-	for (size_t idx = 0; idx < this->dim_; idx++) {
-		if (dims[idx] < 0) { dims[idx] += this->dim_; }
-		if (dims[idx] < 0 || dims[idx] >= this->dim_) {
-			throw std::invalid_argument("Dimension out of range");
-		}
-		seen[dims[idx]] = true;
-	}
-	for (size_t dim = 0; dim < this->dim_; dim++) {
-		if (!seen[dim]) {
-			throw std::invalid_argument("Dimensions input to permute() must be a permutation.");
-		}
-	}
+  if (dims.size() != this->dim_) {
+    throw std::invalid_argument(
+        "Dimensions input to permute() must be a permutation.");
+  }
+  // Validate that dims is a permutation of range(dim_)
+  std::vector<bool> seen(this->dim_, false);
+  for (size_t idx = 0; idx < this->dim_; idx++) {
+    if (dims[idx] < 0) {
+      dims[idx] += this->dim_;
+    }
+    if (dims[idx] < 0 || dims[idx] >= this->dim_) {
+      throw std::invalid_argument("Dimension out of range");
+    }
+    seen[dims[idx]] = true;
+  }
+  for (size_t dim = 0; dim < this->dim_; dim++) {
+    if (!seen[dim]) {
+      throw std::invalid_argument(
+          "Dimensions input to permute() must be a permutation.");
+    }
+  }
 
-	// OK, now it's validated
-	std::vector<size_t> new_shape(this->dim_);
-	std::vector<ssize_t> new_strides(this->dim_);
+  // OK, now it's validated
+  std::vector<size_t> new_shape(this->dim_);
+  std::vector<ssize_t> new_strides(this->dim_);
 
-	for (size_t idx = 0; idx < this->dim_; idx++) {
-		new_shape[idx] = this->shape_[dims[idx]];
-		new_strides[idx] = this->strides_[dims[idx]];
-	}
+  for (size_t idx = 0; idx < this->dim_; idx++) {
+    new_shape[idx] = this->shape_[dims[idx]];
+    new_strides[idx] = this->strides_[dims[idx]];
+  }
 
-	return FloatTensor{this->block_, this->dim_, new_shape, this->offset_, new_strides};
+  return FloatTensor{this->block_, this->dim_, new_shape, this->offset_,
+                     new_strides};
 }
 
 // A special case of permute().
 // Returns a FloatTensor with dimensions i and j interchanged.
 // The return tensor is a new view of the same underlying memory as this.
 FloatTensor FloatTensor::transpose(ssize_t i, ssize_t j) {
-	if (i < 0) { i += this->dim_; }
-	if (j < 0) { j += this->dim_; }
+  if (i < 0) {
+    i += this->dim_;
+  }
+  if (j < 0) {
+    j += this->dim_;
+  }
 
-	if (i < 0 || i >= this->dim_ || j < 0 || j >= this->dim_) {
-		throw std::invalid_argument("Invalid dimensions input to transpose()");
-	}
+  if (i < 0 || i >= this->dim_ || j < 0 || j >= this->dim_) {
+    throw std::invalid_argument("Invalid dimensions input to transpose()");
+  }
 
-	std::vector<ssize_t> dims(this->dim_);
+  std::vector<ssize_t> dims(this->dim_);
 
-	for (int k = 0; k < this->dim_; k++) {
-		dims[k] = k;
-	}
-	dims[i] = j;
-	dims[j] = i;
+  for (int k = 0; k < this->dim_; k++) {
+    dims[k] = k;
+  }
+  dims[i] = j;
+  dims[j] = i;
 
-	return this->permute(dims);
+  return this->permute(dims);
 }
 
 // Flatten dimensions from start_dim to end_dim, inclusive.
 // Unlike pytorch (but like numpy), flatten() always copies
 // the underlying data.
 FloatTensor FloatTensor::flatten(ssize_t start_dim, ssize_t end_dim) {
-	// This is going to be a simple wrapper around reshape().
-	// We just need to compute the new shape.
-	if (start_dim < 0) {start_dim += this->dim_;}
-	if (end_dim < 0) {end_dim += this->dim_;}
+  // This is going to be a simple wrapper around reshape().
+  // We just need to compute the new shape.
+  if (start_dim < 0) {
+    start_dim += this->dim_;
+  }
+  if (end_dim < 0) {
+    end_dim += this->dim_;
+  }
 
-	if (start_dim < 0 || start_dim >= this->dim_ || end_dim < 0 || end_dim >= this->dim_ || end_dim < start_dim) {
-		throw std::invalid_argument("Dimensions out of range in flatten().");
-	}
+  if (start_dim < 0 || start_dim >= this->dim_ || end_dim < 0 ||
+      end_dim >= this->dim_ || end_dim < start_dim) {
+    throw std::invalid_argument("Dimensions out of range in flatten().");
+  }
 
-	std::vector<ssize_t> shape(this->dim_ + start_dim - end_dim);
+  std::vector<ssize_t> shape(this->dim_ + start_dim - end_dim);
 
-	for(int i = 0; i < start_dim; i++) {
-		shape[i] = this->shape_[i];
-	}
+  for (int i = 0; i < start_dim; i++) {
+    shape[i] = this->shape_[i];
+  }
 
-	shape[start_dim] = -1;
+  shape[start_dim] = -1;
 
-	for(int i = end_dim + 1; i < this->dim_; i++) {
-		shape[i + start_dim - end_dim] = this->shape_[i];
-	}
+  for (int i = end_dim + 1; i < this->dim_; i++) {
+    shape[i + start_dim - end_dim] = this->shape_[i];
+  }
 
-	return this->reshape(shape);
+  return this->reshape(shape);
 }
 
-// If input is not contiguous, return a contiguous copy; otherwise, return input unchanged.
+// If input is not contiguous, return a contiguous copy; otherwise, return input
+// unchanged.
 FloatTensor FloatTensor::contiguous() {
-	if (this->is_contiguous()) { return *this; }
-	return this->contiguous_clone();
+  if (this->is_contiguous()) {
+    return *this;
+  }
+  return this->contiguous_clone();
 }
 
-// Return a new view of input tensor with singleton dimensions expanded to larger size.
-// Argument 'new_shape' must have same length as input tensor dimension
-// (note: this is different from the pytorch API)
-// and must match input tensor dimension in all non-singleton dimensions.
-// A -1 in argument 'new_shape' will be replaced with the corresponding dimension 
-// of the input tensor.
+// Return a new view of input tensor with singleton dimensions expanded to
+// larger size. Argument 'new_shape' must have same length as input tensor
+// dimension (note: this is different from the pytorch API) and must match input
+// tensor dimension in all non-singleton dimensions. A -1 in argument
+// 'new_shape' will be replaced with the corresponding dimension of the input
+// tensor.
 FloatTensor FloatTensor::expand(std::vector<ssize_t> new_shape) {
-	if (new_shape.size() != this->dim_) {
-		throw std::invalid_argument("In expand() new_shape must match the dimension of the original tensor.");
-	}
+  if (new_shape.size() != this->dim_) {
+    throw std::invalid_argument("In expand() new_shape must match the "
+                                "dimension of the original tensor.");
+  }
 
-	for (int idx = 0; idx < this->dim_; idx++){
-		if (new_shape[idx] == -1) { new_shape[idx] = this->shape_[idx]; }
-		
-		if (new_shape[idx] <= 0) {
-			throw std::invalid_argument("Invalid shape input to expand().");
-		}
+  for (int idx = 0; idx < this->dim_; idx++) {
+    if (new_shape[idx] == -1) {
+      new_shape[idx] = this->shape_[idx];
+    }
 
-		if (new_shape[idx] != this->shape_[idx] && this->shape_[idx] != 1) {
-			throw std::invalid_argument("In expand() new_shape must agree with existing shape in all non-singleton dimensions.");
-		}
-	}
+    if (new_shape[idx] <= 0) {
+      throw std::invalid_argument("Invalid shape input to expand().");
+    }
 
-	std::vector<ssize_t> new_strides(this->dim_);
-	std::vector<size_t> new_shape_unsigned(this->dim_);
+    if (new_shape[idx] != this->shape_[idx] && this->shape_[idx] != 1) {
+      throw std::invalid_argument(
+          "In expand() new_shape must agree with existing shape in all "
+          "non-singleton dimensions.");
+    }
+  }
 
-	for(int idx = 0; idx < this->dim_; idx++) {
-		if (this->shape_[idx] == 1 && new_shape[idx] > 1) {
-			new_strides[idx] = 0;
-		} else {
-			new_strides[idx] = this->strides_[idx];
-		}
+  std::vector<ssize_t> new_strides(this->dim_);
+  std::vector<size_t> new_shape_unsigned(this->dim_);
 
-		new_shape_unsigned[idx] = static_cast<size_t>(new_shape[idx]);
-	}
+  for (int idx = 0; idx < this->dim_; idx++) {
+    if (this->shape_[idx] == 1 && new_shape[idx] > 1) {
+      new_strides[idx] = 0;
+    } else {
+      new_strides[idx] = this->strides_[idx];
+    }
 
-	return FloatTensor{this->block_, this->dim_, new_shape_unsigned, this->offset_, new_strides};
+    new_shape_unsigned[idx] = static_cast<size_t>(new_shape[idx]);
+  }
+
+  return FloatTensor{this->block_, this->dim_, new_shape_unsigned,
+                     this->offset_, new_strides};
 }
 
 // Repeat the input tensor the given number of times along each dimension.
@@ -876,60 +923,63 @@ FloatTensor FloatTensor::expand(std::vector<ssize_t> new_shape) {
 // If it has exactly this->dim_ entries, then
 // the output tensor will consist of copies of the input tensor,
 // repeated n_repeats[idx] times along the idx-th dimension.
-// If n_repeats has more than this->dim_ entries, then 
+// If n_repeats has more than this->dim_ entries, then
 // new dimensions will be prepended before existing dimensions.
 // Example: input tensor (10,), n_repeats = (2, 3) --> output shape (2, 30).
 //
 // In every case, repeat() creates a new copy in memory.
 FloatTensor FloatTensor::repeat(std::vector<size_t> n_repeats) {
-	// Temporary tensor object to carry shape and stride manipulations
-	FloatTensor x = *this;
+  // Temporary tensor object to carry shape and stride manipulations
+  FloatTensor x = *this;
 
-	if (n_repeats.size() < this->dim_) {
-		throw std::invalid_argument("Shape input to repeat() must have at least as many entries as dimension of the input tensor.");
-	}
+  if (n_repeats.size() < this->dim_) {
+    throw std::invalid_argument(
+        "Shape input to repeat() must have at least as many entries as "
+        "dimension of the input tensor.");
+  }
 
-	// If there are extra entries in n_repeats, pad n_repeats
-	while (x.dim_ < n_repeats.size()) {
-		x = x.unsqueeze(0);
-	}
+  // If there are extra entries in n_repeats, pad n_repeats
+  while (x.dim_ < n_repeats.size()) {
+    x = x.unsqueeze(0);
+  }
 
-	assert(x.dim_ == n_repeats.size());
+  assert(x.dim_ == n_repeats.size());
 
-	// This is a convenient time to compute the output shape.
-	std::vector<ssize_t> output_shape(0);
-	for(size_t idx = 0; idx < n_repeats.size(); idx++) {
-		output_shape.push_back(x.shape_[idx] * n_repeats[idx]);
-	}
+  // This is a convenient time to compute the output shape.
+  std::vector<ssize_t> output_shape(0);
+  for (size_t idx = 0; idx < n_repeats.size(); idx++) {
+    output_shape.push_back(x.shape_[idx] * n_repeats[idx]);
+  }
 
-	// prepare for an expand operation: create alternating singleton dimensions
-	// e.g. if x (d0, d1, d2), unsqueeze to (1, d0, 1, d1, 1, d2)
-	for(ssize_t idx = 0; idx < n_repeats.size(); idx++) {
-		x = x.unsqueeze(2 * idx);
-	}
+  // prepare for an expand operation: create alternating singleton dimensions
+  // e.g. if x (d0, d1, d2), unsqueeze to (1, d0, 1, d1, 1, d2)
+  for (ssize_t idx = 0; idx < n_repeats.size(); idx++) {
+    x = x.unsqueeze(2 * idx);
+  }
 
-	// Prepare expand parameters
-	// For example, if n_repeats = (r0, r1, r2), then expand by (r0, -1, r1, -1, r2, -1)
-	std::vector<ssize_t> expand_shape(0);
+  // Prepare expand parameters
+  // For example, if n_repeats = (r0, r1, r2), then expand by (r0, -1, r1, -1,
+  // r2, -1)
+  std::vector<ssize_t> expand_shape(0);
 
-	for(size_t item: n_repeats) {
-		expand_shape.push_back(item);
-		expand_shape.push_back(-1);
-	}
+  for (size_t item : n_repeats) {
+    expand_shape.push_back(item);
+    expand_shape.push_back(-1);
+  }
 
-	// Call expand().
-	x = x.expand(expand_shape);
+  // Call expand().
+  x = x.expand(expand_shape);
 
-	// Up to here no expensive copies happened,
-	// just some reshaping operations and copying of metadata.
-	// Now we copy.
-	x = x.contiguous_clone();
+  // Up to here no expensive copies happened,
+  // just some reshaping operations and copying of metadata.
+  // Now we copy.
+  x = x.contiguous_clone();
 
-	// At this point x is a contiguous tensor with shape (r0, d0, r1, d1, r2, d2).
-	// Finally reshape to get the output we want.
-	x = x.reshape(output_shape);
+  // At this point x is a contiguous tensor with shape (r0, d0, r1, d1, r2, d2).
+  // Finally reshape to get the output we want.
+  x = x.reshape(output_shape);
 
-	return x;
+  return x;
 }
 
 // =================== Memory management ==========================
@@ -1017,26 +1067,29 @@ bool FloatTensor::is_eq(FloatTensor &other) {
 // point to the same underlying position in memory.
 // Like Pytorch, we guard against this only in a special case.
 void FloatTensor::view_assign(FloatTensor &other) {
-	validate_same_shape(other);
+  validate_same_shape(other);
 
-	for(int idx = 0; idx < this->dim_; idx++) {
-		if (this->strides_[idx] == 0 && this->shape_[idx] != 1) {
-			throw std::invalid_argument("Cannot call view_assign on tensor with strides of zero.");
-		}
-	}
+  for (int idx = 0; idx < this->dim_; idx++) {
+    if (this->strides_[idx] == 0 && this->shape_[idx] != 1) {
+      throw std::invalid_argument(
+          "Cannot call view_assign on tensor with strides of zero.");
+    }
+  }
 
-	if (this->dev_() != other.dev_()) {
-		throw std::invalid_argument("Copying data between tensors on different devices not permitted.  Move tensors to same device first.");
-	}
+  if (this->dev_() != other.dev_()) {
+    throw std::invalid_argument(
+        "Copying data between tensors on different devices not permitted.  "
+        "Move tensors to same device first.");
+  }
 
-	if (this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
-		launch_view_assign(this, &other);
-	} else {
-		for (size_t i = 0; i < this->numel(); i++) {
-		  LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
-		  this->set_idx(log_idx, other.get_idx(log_idx));
-		}
-	}
+  if (this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
+    launch_view_assign(this, &other);
+  } else {
+    for (size_t i = 0; i < this->numel(); i++) {
+      LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
+      this->set_idx(log_idx, other.get_idx(log_idx));
+    }
+  }
 }
 
 FloatTensor FloatTensor::add(FloatTensor &other) {
@@ -1242,20 +1295,130 @@ FloatTensor FloatTensor::matmul_tiled_2(FloatTensor &other) {
 // - contiguous
 // - want to transpose last two dimensions
 FloatTensor FloatTensor::transpose_special_case() {
-	if (!this->is_contiguous() || this->dim_ != 3) {
-		throw std::invalid_argument("Function transpose() requires contiguous 3d argument.");
-	}
-	if (this->dev_() != Device::GPU) {
-		throw std::invalid_argument("Function transpose() only implemented on GPU.");
-	}
+  if (!this->is_contiguous() || this->dim_ != 3) {
+    throw std::invalid_argument(
+        "Function transpose() requires contiguous 3d argument.");
+  }
+  if (this->dev_() != Device::GPU) {
+    throw std::invalid_argument(
+        "Function transpose() only implemented on GPU.");
+  }
 
-	std::vector<size_t> result_shape{this->shape_[0], this->shape_[2], this->shape_[1]};
+  std::vector<size_t> result_shape{this->shape_[0], this->shape_[2],
+                                   this->shape_[1]};
 
-	FloatTensor result = FloatTensor::zeros(result_shape, this->dev_());
+  FloatTensor result = FloatTensor::zeros(result_shape, this->dev_());
 
-	std::cout << "CUDA transpose kernel" << std::endl;
-	launch_transpose(this, &result);
+  std::cout << "CUDA transpose kernel" << std::endl;
+  launch_transpose(this, &result);
 
-	return result;
+  return result;
 }
-	
+
+// ========================= Pointwise operations ====================
+
+// Somewhere I got the clever idea that this template trick would reduce boilerplate.
+// It didn't help much.
+// The problem is that I don't seem to be able to invoke a CUDA template
+// from C++ code:
+// the template has to be implemented in the header,
+// and the C++ compiler will freak out if it sees "batchDim"...
+template <typename Func>
+FloatTensor FloatTensor::pointwise_op(FloatTensor &result, Func f) {
+  // this is the CPU path, should never be called from GPU tensor
+  assert(this->dev_() == Device::CPU);
+
+  // generic CPU code
+  // just fill values one by one
+  for (size_t i = 0; i < this->numel(); i++) {
+    LogicalIndex log_idx = flat_idx_to_idx(FlatLogicalIndex{i}, this->shape_);
+    float val = this->get_idx(log_idx);
+    result.set_idx(log_idx, f(val));
+  }
+  return result;
+}
+
+// ============ structs for various operations
+struct AbsOp {
+	// abs(x) is a weird C function that converts to int and back...
+  float operator()(float x) const { return std::abs(x); }
+};
+
+struct ExpOp {
+  float operator()(float x) const { return expf(x); }
+};
+
+struct LogOp {
+  float operator()(float x) const { return logf(x); }
+};
+
+struct SqrtOp {
+  float operator()(float x) const { return sqrtf(x); }
+};
+
+struct ReLUOp {
+  float operator()(float x) const { return x > 0.0f ? x : 0.0f; }
+};
+
+// ============ wrapper functions for various operations
+FloatTensor FloatTensor::abs() {
+  FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
+
+  if (this->dev_() == Device::GPU) {
+    launch_abs(this, &result);
+  } else {
+    this->pointwise_op(result, AbsOp{});
+  }
+
+  return result;
+}
+
+FloatTensor FloatTensor::exp() {
+  FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
+
+  if (this->dev_() == Device::GPU) {
+    launch_exp(this, &result);
+  } else {
+    this->pointwise_op(result, ExpOp{});
+  }
+
+  return result;
+}
+
+FloatTensor FloatTensor::log() {
+  FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
+
+  if (this->dev_() == Device::GPU) {
+    launch_log(this, &result);
+  } else {
+    this->pointwise_op(result, LogOp{});
+  }
+
+  return result;
+}
+
+FloatTensor FloatTensor::sqrt() {
+  FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
+
+  if (this->dev_() == Device::GPU) {
+    launch_sqrt(this, &result);
+  } else {
+    this->pointwise_op(result, SqrtOp{});
+  }
+
+  return result;
+}
+
+FloatTensor FloatTensor::relu() {
+  FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
+
+  if (this->dev_() == Device::GPU) {
+    launch_relu(this, &result);
+  } else {
+    this->pointwise_op(result, ReLUOp{});
+  }
+
+  return result;
+}
+
+
