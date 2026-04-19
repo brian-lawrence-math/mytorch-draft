@@ -20,7 +20,6 @@
 //   25600 floats / SM
 //   we only have one block per SM right now anyway
 
-
 #define TPB_ROW (32)
 #define TPB_COL (32)
 #define TILE_ROWS (4)
@@ -269,8 +268,8 @@ __global__ void matmul_3d(ContiguousTensor3d_Device a,
 __global__ void matmul_tiled(ContiguousTensor3d_Device a,
                              ContiguousTensor3d_Device b,
                              ContiguousTensor3d_Device res) {
-  // blocks: (batch, row, col)
-  // threads: (1, row, col)
+  // blocks: (batch, col, row)
+  // threads: (1, col, row)
 
   // compute batch
   size_t batch = blockIdx.x;
@@ -287,6 +286,8 @@ __global__ void matmul_tiled(ContiguousTensor3d_Device a,
 
   size_t a_shared_row_offset = blockIdx.z * blockDim.z * TILE_ROWS;
   size_t b_shared_col_offset = blockIdx.y * blockDim.y * TILE_COLS;
+
+  float tmp[TILE_ROWS * TILE_COLS] = {0};
 
   for (size_t start_loop_idx = 0; start_loop_idx < a.shape[2];
        start_loop_idx += MUL_LOOP_TO_LOAD) {
@@ -340,12 +341,25 @@ __global__ void matmul_tiled(ContiguousTensor3d_Device a,
     // now that everything has been loaded into a_shared and b_shared,
     // we can do some computation
 
-    for (size_t row = threadIdx.z;
-         row < blockDim.z * TILE_ROWS && a_shared_row_offset + row < a.shape[1];
-         row += blockDim.z) {
-      for (size_t col = threadIdx.y; col < blockDim.y * TILE_COLS &&
-                                     b_shared_col_offset + col < b.shape[2];
-           col += blockDim.y) {
+
+    // row = threadIdx.z + row_ctr * blockDim.z
+    // row_ctr goes 0 to TILE_ROWS
+    // a_shared_row_offset + row < a.shape[1]
+    for (size_t row_ctr = 0; row_ctr < TILE_ROWS; row_ctr++) {
+      size_t row = threadIdx.z + row_ctr * blockDim.z;
+      if (a_shared_row_offset + row >= a.shape[1]) {
+        continue;
+      }
+
+      // col = threadIdx.y + col_ctr * blockDim.y
+      // col_ctr goes 0 to TILE_COLS
+      // b_shared_col_offset + col < b.shape(2)
+      for (size_t col_ctr = 0; col_ctr < TILE_COLS; col_ctr++) {
+        size_t col = threadIdx.y + col_ctr * blockDim.y;
+        if (b_shared_col_offset + col >= b.shape[2]) {
+          continue;
+        }
+
         // am I doing too much computation in this loop?
         float cml_sum = 0.0;
 
@@ -358,9 +372,32 @@ __global__ void matmul_tiled(ContiguousTensor3d_Device a,
         // make the update
         // don't worry about synchronization or atomic add because
         // I'm the only thread touching this entry of res
-        res_batch_data[(a_shared_row_offset + row) * res.shape[2] +
-                       (b_shared_col_offset + col)] += cml_sum;
+        tmp[row_ctr * TILE_COLS + col_ctr] += cml_sum;
       }
+    }
+  }
+
+  // row = threadIdx.z + row_ctr * blockDim.z
+  // row_ctr goes 0 to TILE_ROWS
+  // a_shared_row_offset + row < a.shape[1]
+  for (size_t row_ctr = 0; row_ctr < TILE_ROWS; row_ctr++) {
+    size_t row = threadIdx.z + row_ctr * blockDim.z;
+    if (a_shared_row_offset + row < a.shape[1]) {
+      continue;
+    }
+
+    // col = threadIdx.y + col_ctr * blockDim.y
+    // col_ctr goes 0 to TILE_COLS
+    // b_shared_col_offset + col < b.shape(2)
+    for (size_t col_ctr = 0; col_ctr < TILE_COLS; col_ctr++) {
+      size_t col = threadIdx.y + col_ctr * blockDim.y;
+      if (b_shared_col_offset + col < b.shape[2]) {
+        continue;
+      }
+
+      res_batch_data[(a_shared_row_offset + row) * res.shape[2] +
+                     (b_shared_col_offset + col)] =
+          tmp[row_ctr * TILE_COLS + col_ctr];
     }
   }
 }

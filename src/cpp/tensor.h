@@ -88,7 +88,8 @@ struct FloatTensor {
 
   FloatTensor transpose_special_case();
 
-  template <typename Func> FloatTensor pointwise_op(FloatTensor &result, Func f);
+  template <typename Func>
+  FloatTensor pointwise_op(FloatTensor &result, Func f);
   FloatTensor abs();
   FloatTensor exp();
   FloatTensor log();

@@ -32,7 +32,8 @@ __global__ void pointwise_kernel(float *tensor_in, float *tensor_out,
 }
 
 template <typename Func>
-__host__ void launch_pointwise_kernel(FloatTensor *in, FloatTensor *out, Func f) {
+__host__ void launch_pointwise_kernel(FloatTensor *in, FloatTensor *out,
+                                      Func f) {
   size_t num_entries = in->numel();
   size_t n_blocks, threads_per_block;
   if (num_entries < TARGET_THREADS_PER_BLOCK) {
@@ -90,4 +91,3 @@ void launch_sqrt(FloatTensor *in, FloatTensor *out) {
 void launch_relu(FloatTensor *in, FloatTensor *out) {
   launch_pointwise_kernel(in, out, ReLUOp{});
 }
-

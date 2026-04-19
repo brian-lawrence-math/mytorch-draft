@@ -1317,12 +1317,10 @@ FloatTensor FloatTensor::transpose_special_case() {
 
 // ========================= Pointwise operations ====================
 
-// Somewhere I got the clever idea that this template trick would reduce boilerplate.
-// It didn't help much.
-// The problem is that I don't seem to be able to invoke a CUDA template
-// from C++ code:
-// the template has to be implemented in the header,
-// and the C++ compiler will freak out if it sees "batchDim"...
+// Somewhere I got the clever idea that this template trick would reduce
+// boilerplate. It didn't help much. The problem is that I don't seem to be able
+// to invoke a CUDA template from C++ code: the template has to be implemented
+// in the header, and the C++ compiler will freak out if it sees "batchDim"...
 template <typename Func>
 FloatTensor FloatTensor::pointwise_op(FloatTensor &result, Func f) {
   // this is the CPU path, should never be called from GPU tensor
@@ -1340,7 +1338,7 @@ FloatTensor FloatTensor::pointwise_op(FloatTensor &result, Func f) {
 
 // ============ structs for various operations
 struct AbsOp {
-	// abs(x) is a weird C function that converts to int and back...
+  // abs(x) is a weird C function that converts to int and back...
   float operator()(float x) const { return std::abs(x); }
 };
 
@@ -1420,5 +1418,3 @@ FloatTensor FloatTensor::relu() {
 
   return result;
 }
-
-
