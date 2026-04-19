@@ -1206,48 +1206,6 @@ bool FloatTensor::is_contiguous() {
   return true;
 }
 
-FloatTensor FloatTensor::matmul_3d(FloatTensor &other) {
-  if (!this->is_contiguous() && !other.is_contiguous()) {
-    throw std::invalid_argument(
-        "Function matmul_3d() only accepts contiguous tensors.");
-  }
-
-  if (this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
-    std::vector<size_t> result_shape = validate_matmul_shape(other);
-
-    // allocate the memory
-    FloatTensor result = FloatTensor::uninitialized(result_shape, this->dev_());
-
-    std::cout << "CUDA matmul_3d kernel" << std::endl;
-    launch_matmul_3d(this, &other, &result);
-
-    return result;
-  } else {
-    return this->matmul(other);
-  }
-}
-
-FloatTensor FloatTensor::matmul_tiled(FloatTensor &other) {
-  if (!this->is_contiguous() && !other.is_contiguous()) {
-    throw std::invalid_argument(
-        "Function matmul_3d() only accepts contiguous tensors.");
-  }
-
-  if (this->dev_() == Device::GPU && other.dev_() == Device::GPU) {
-    std::vector<size_t> result_shape = validate_matmul_shape(other);
-
-    // allocate the memory
-    FloatTensor result = FloatTensor::zeros(result_shape, this->dev_());
-
-    std::cout << "CUDA matmul_tiled kernel" << std::endl;
-    launch_matmul_tiled(this, &other, &result);
-
-    return result;
-  } else {
-    return this->matmul(other);
-  }
-}
-
 FloatTensor FloatTensor::matmul_cublas(FloatTensor &other) {
   if (!this->is_contiguous() && !other.is_contiguous()) {
     throw std::invalid_argument(

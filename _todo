@@ -48,6 +48,15 @@ OTHER TODOS:
 	- sum along axis, sum overall
 	- scalar mul / div
 
+OPTIMIZATION TODOS:
+
+- vectorized loads
+- double-buffering and prefetching
+- parameter selection
+- bank conflicts on shared memory
+- unroll inner k loop
+- check bounds
+
 NOTES:
 
 cuda-memcheck and valgrind

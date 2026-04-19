@@ -24,7 +24,7 @@ void bench_matmul() {
 	res.move_to_device(Device::CPU);
 	std::cout << res.raw_repr() << std::endl;
 
-	res = t1.matmul_tiled(t2);
+	res = t1.matmul_tiled_2(t2);
 	res.move_to_device(Device::CPU);
 	std::cout << res.raw_repr() << std::endl;
 	
