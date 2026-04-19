@@ -29,7 +29,7 @@ void bench_matmul() {
 
 	std::cout << "Value: " << res.get_raw_idx(raw_idx) << std::endl;
 	std::chrono::duration<double> elapsed = stop - start;
-	std::cout << "Time elapsed: " << elapsed.count() << std::endl;
+	std::cout << "Time elapsed (tiled_2): " << elapsed.count() << std::endl;
 
 
 	//t1 = FloatTensor::randn({100, 1000, 1000}, Device::GPU);
@@ -48,7 +48,7 @@ void bench_matmul() {
 
 	std::cout << "Value: " << res.get_raw_idx(raw_idx) << std::endl;
 	elapsed = stop - start;
-	std::cout << "Time elapsed: " << elapsed.count() << std::endl;
+	std::cout << "Time elapsed (cublas): " << elapsed.count() << std::endl;
 
 }
 

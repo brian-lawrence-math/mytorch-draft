@@ -26,13 +26,13 @@
 #define TILE_ROWS (4)
 #define TILE_COLS (4)
 
-#define TM (4)
-#define TN (4)
-#define TPBM (32)
-#define TPBN (32)
+#define TM (8)
+#define TN (8)
+#define TPBM (16)
+#define TPBN (16)
 #define BM (TM * TPBM)
 #define BN (TN * TPBN)
-#define BK (8)
+#define BK (16)
 
 // make sure blockDim.z is a multiple of warp size
 static_assert((TPB_ROW % 32 == 0));
