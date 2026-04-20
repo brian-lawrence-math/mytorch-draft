@@ -234,7 +234,7 @@ __global__ void matmul_tiled_2(ContiguousTensor3d_Device a,
                                ContiguousTensor3d_Device b,
                                ContiguousTensor3d_Device res) {
   // blocks: (batch, row, col)
-  // threads: (n_threads, 1, 1)  -- I will manage it myself
+  // threads: (n_threads, 1, 1)  -- I will manage indexing myself
 
   size_t M = a.shape[1], K = a.shape[2], N = b.shape[2];
   size_t a_row_base = BM * blockIdx.y;

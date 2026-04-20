@@ -30,12 +30,15 @@ Tensor:
 ## Optimization
 
 Along the way I got distracted trying to optimize matrix multiplication.
-Read more about that [here](https://brian-lawrence-math.github.io/2026/04/17/opt.html).
+It's still a work in progress, 
+but I got some big gains (8x improvement from the naive first kernel!)
+and I learned a lot about the physical limitations of memory on GPU.
+Read more about it [here](https://brian-lawrence-math.github.io/2026/04/17/opt.html).
 
 ## AI Agents?
 
 Somewhat stubbornly I wanted to code this project up by hand.
-After all, I'm new to both C++ and CUDA.  I want to learn to write the code myself first,
+After all, I'm new to both C++ and CUDA.  I want to learn to write the code myself
 before I supervise an AI.
 I'm looking for the best way to learn, not the fastest way to ship code.
 (The one exception is the unit tests, many of which were written by Codex.)
