@@ -280,13 +280,16 @@ __global__ void matmul_tiled_2(ContiguousTensor3d_Device a,
     }
 
     // B_s[i, j] = B[k + i, b_col + j]
-    for (size_t b_idx = threadIdx.x; b_idx < BK * BN; b_idx += blockDim.x) {
+    for (size_t b_idx = 4 * threadIdx.x; b_idx < BK * BN; b_idx += 4 * blockDim.x) {
       size_t i = b_idx / BN;
       size_t j = b_idx % BN;
       if (k0 + i < K && j + b_col_base < N) {
-        B_s[i * BN + j] = B[(k0 + i) * b.shape[2] + j];
+        *reinterpret_cast<float4*>(&B_s[i * BN + j]) = *reinterpret_cast<float4*>(&B[(k0 + i) * b.shape[2] + j]);
       } else {
         B_s[i * BN + j] = 0;
+        B_s[i * BN + j + 1] = 0;
+        B_s[i * BN + j + 2] = 0;
+        B_s[i * BN + j + 3] = 0;
       }
     }
 
