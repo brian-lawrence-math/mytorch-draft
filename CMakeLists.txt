@@ -4,7 +4,8 @@ project(mytorch LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(PYBIND11_FIND_PYTHON ON)
-set(CMAKE_CUDA_ARCHITECTURES 86)
+# generate PTX intermediate representation during compilation
+set(CMAKE_CUDA_ARCHITECTURES "86-real;86-virtual")
 enable_language(CUDA)
 
 set(MYTORCH_VENV_PYTHON "${CMAKE_SOURCE_DIR}/.venv/bin/python")

@@ -266,13 +266,16 @@ __global__ void matmul_tiled_2(ContiguousTensor3d_Device a,
     // values to fill: BM * BK
     // threads: TPB
     // want: blockDim.x div. by BK
-    for (size_t a_idx = threadIdx.x; a_idx < BM * BK; a_idx += blockDim.x) {
+    for (size_t a_idx = 4 * threadIdx.x; a_idx < BM * BK; a_idx += 4 * blockDim.x) {
       size_t i = a_idx / BK;
       size_t j = a_idx % BK;
       if (k0 + j < K && i + a_row_base < M) {
-        A_s[i * BK + j] = A[i * (a.shape[2]) + k0 + j];
+        *reinterpret_cast<float4*>(&A_s[i * BK + j]) = *reinterpret_cast<float4*>(&A[i * (a.shape[2]) + k0 + j]);
       } else {
         A_s[i * BK + j] = 0;
+		A_s[i * BK + j + 1] = 0;
+		A_s[i * BK + j + 2] = 0;
+		A_s[i * BK + j + 3] = 0;
       }
     }
 
