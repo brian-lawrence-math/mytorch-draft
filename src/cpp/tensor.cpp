@@ -1411,7 +1411,7 @@ FloatTensor FloatTensor::reduce_op(FloatTensor &result, size_t red_dim, Func f) 
 
   // generic CPU code
   // just fill values one by one
-  for (size_t i = 0; i < this->numel(); i++) {
+  for (size_t i = 0; i < result.numel(); i++) {
 	LogicalIndex log_idx_in = flat_idx_to_idx_skip_dim(FlatLogicalIndex{i}, this->shape_, red_dim);
     LogicalIndex log_idx_out = flat_idx_to_idx(FlatLogicalIndex{i}, result.shape_);
 

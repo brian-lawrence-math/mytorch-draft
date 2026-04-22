@@ -53,8 +53,6 @@ PYBIND11_MODULE(_core, mytorch, py::mod_gil_not_used()) {
       .def("sub", &FloatTensor::sub)
       .def("mul", &FloatTensor::mul)
       .def("matmul", &FloatTensor::matmul)
-      //.def("matmul_3d", &FloatTensor::matmul_3d)
-      //.def("matmul_tiled", &FloatTensor::matmul_tiled)
       .def("abs", &FloatTensor::abs)
       .def("exp", &FloatTensor::exp)
       .def("log", &FloatTensor::log)
