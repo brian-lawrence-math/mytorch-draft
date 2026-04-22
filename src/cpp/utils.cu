@@ -10,12 +10,24 @@ __device__ size_t product_device(size_t *vals, size_t n) {
 }
 
 // shape is an array size_t[dim]
-// strides is another array size_t[dim] of the same size
+// strides is another array ssize_t[dim] of the same size
 __device__ size_t flat_idx_to_raw_idx_device(size_t flat_idx, size_t *shape,
                                              ssize_t *strides, size_t offset,
                                              size_t dim) {
   ssize_t result = offset;
   for (size_t d = dim; d-- > 0;) {
+    result += (flat_idx % shape[d]) * strides[d];
+    flat_idx /= shape[d];
+  }
+  return (size_t)result;
+}
+
+// helper function for "reduce" functions
+__device__ size_t flat_idx_to_raw_idx_skip_dim_device(size_t flat_idx, size_t *shape,
+		ssize_t *strides, size_t offset, size_t dim, size_t skip_dim) {
+  ssize_t result = offset;
+  for (size_t d = dim; d-- > 0;) {
+	  if (d == skip_dim) {continue;}
     result += (flat_idx % shape[d]) * strides[d];
     flat_idx /= shape[d];
   }

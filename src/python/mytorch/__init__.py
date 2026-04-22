@@ -228,3 +228,6 @@ class FloatTensor:
 	def relu(self):
 		return FloatTensor(self._base.relu())
 
+	def sum(self, dim):
+		return FloatTensor(self._base.sum(dim))
+

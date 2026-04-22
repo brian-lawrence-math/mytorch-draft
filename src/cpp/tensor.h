@@ -95,6 +95,13 @@ struct FloatTensor {
   FloatTensor log();
   FloatTensor sqrt();
   FloatTensor relu();
+
+
+
+  template <typename Func>
+  FloatTensor reduce_op(FloatTensor &result, size_t red_dim, Func f);
+
+  FloatTensor sum(ssize_t red_dim);
 };
 
 #endif

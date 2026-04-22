@@ -25,7 +25,7 @@ find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(pybind11 CONFIG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 
-set(COMPILE_SOURCES src/cpp/tensor.cpp src/cpp/kernels.cu src/cpp/utils.cu src/cpp/pointwise.cu)
+set(COMPILE_SOURCES src/cpp/tensor.cpp src/cpp/kernels.cu src/cpp/utils.cu src/cpp/pointwise.cu src/cpp/reduce.cu)
 
 add_library(mytorch_core STATIC ${COMPILE_SOURCES})
 

@@ -14,6 +14,7 @@
 #include "cuda_utils.h"
 #include "kernels.cuh"
 #include "pointwise.cuh"
+#include "reduce.cuh"
 #include "tensor.h"
 
 // ======================== Memory management ========================
@@ -148,6 +149,26 @@ LogicalIndex flat_idx_to_idx(const FlatLogicalIndex &idx,
   for (size_t d = shape.size(); d-- > 0;) {
     result[d] = flat_idx % shape[d];
     flat_idx /= shape[d];
+  }
+  return LogicalIndex{result};
+}
+
+// helper function for "reduce" operations like sum
+LogicalIndex flat_idx_to_idx_skip_dim(const FlatLogicalIndex &idx,
+                             std::vector<size_t> shape, size_t skip_dim) {
+  size_t flat_idx = idx.idx;
+  if (flat_idx >= product(shape)) {
+    throw std::out_of_range("Index into tensor out of range.");
+  }
+
+  std::vector<ssize_t> result(shape.size());
+  for (size_t d = shape.size(); d-- > 0;) {
+    if (d == skip_dim) {
+		result[d] = 0;
+	} else {
+		result[d] = flat_idx % shape[d];
+		flat_idx /= shape[d];
+	}
   }
   return LogicalIndex{result};
 }
@@ -1376,3 +1397,68 @@ FloatTensor FloatTensor::relu() {
 
   return result;
 }
+
+// ======================= Reduce operations ========================
+// IN PROGRESS HERE
+
+template <typename Func>
+FloatTensor FloatTensor::reduce_op(FloatTensor &result, size_t red_dim, Func f) {
+  // this is the CPU path, should never be called from GPU tensor
+  assert(this->dev_() == Device::CPU);
+
+  size_t red_shape = this->shape_[red_dim];
+  ssize_t red_stride = this->strides_[red_dim];
+
+  // generic CPU code
+  // just fill values one by one
+  for (size_t i = 0; i < this->numel(); i++) {
+	LogicalIndex log_idx_in = flat_idx_to_idx_skip_dim(FlatLogicalIndex{i}, this->shape_, red_dim);
+    LogicalIndex log_idx_out = flat_idx_to_idx(FlatLogicalIndex{i}, result.shape_);
+
+	float val = f.initial_value();
+	assert(log_idx_in.coords[red_dim] == 0);
+	for(; log_idx_in.coords[red_dim] < red_shape; log_idx_in.coords[red_dim] ++) {
+		val = f(val, this->get_idx(log_idx_in));
+	}
+	
+    result.set_idx(log_idx_out, val);
+  }
+  return result;
+}
+
+// structs for individual operations
+struct SumOp {
+	float initial_value() { return 0.0f; }
+	float operator()(float acc, float val) const {return acc + val;}
+};
+
+// wrapper functions for individual operations
+
+// sum along the red_dim dimension
+FloatTensor FloatTensor::sum(ssize_t red_dim) {
+	// validate red_dim and compute new shape
+  if (red_dim < 0) { red_dim += this->dim_; }
+
+  if (red_dim < 0 || red_dim >= this->dim_) {
+    throw std::invalid_argument("Invalid dimension as input to sum().");
+  }
+
+  std::vector<size_t> new_shape{};
+  for (int idx = 0; idx < this->dim_; idx++) {
+	  if (idx == red_dim) { continue; }
+	  new_shape.push_back(this->shape_[idx]);
+  }
+  
+  FloatTensor result = FloatTensor::uninitialized(new_shape, this->dev_());
+
+  if (this->dev_() == Device::GPU) {
+    launch_sum(this, &result, red_dim);
+  } else {
+	  this->reduce_op(result, red_dim, SumOp{});
+  }
+
+  return result;
+}
+
+
+

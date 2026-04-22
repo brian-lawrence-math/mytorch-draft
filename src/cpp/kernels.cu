@@ -259,7 +259,6 @@ __global__ void matmul_tiled_2(ContiguousTensor3d_Device a,
   size_t this_thread_col = threadIdx.x % TPBN;
 
   for (size_t k0 = 0; k0 < K; k0 += BK) {
-    __syncthreads();
     // load a and b
     // A_s[i, j] = A[a_row + i, k + j]
 
@@ -316,6 +315,7 @@ __global__ void matmul_tiled_2(ContiguousTensor3d_Device a,
         }
       }
     }
+	__syncthreads();
   }
   // now tmp[row * TN + col] goes into RES[(row * TPBM + this_thread_row) *
   // res.shape[2] + (col * TPBN + this_thread_col)]

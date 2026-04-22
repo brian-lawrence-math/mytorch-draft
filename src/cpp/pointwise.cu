@@ -8,9 +8,6 @@
 // template time yay
 // this will compute any pointwise function on tensor_in
 
-// templates must be implemented in headers, so this whole thing is a header
-// file...
-
 template <typename Func>
 __global__ void pointwise_kernel(float *tensor_in, float *tensor_out,
                                  size_t *shape, ssize_t *in_strides,
