@@ -5,7 +5,10 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+
+#include <algorithm>
 #include <iostream>
+#include <limits>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -118,7 +121,8 @@ template <typename T> std::string vector_to_string(std::vector<T> v) {
 // ========================== Helper methods for indexing =====================
 
 // product of a list of size_t or ssize_t
-template <typename T> T product(std::vector<T> vals) {
+// named product_ints() to avoid conflict with FloatTensor::product()
+template <typename T> T product_ints(std::vector<T> vals) {
   T cml_prod = 1;
   for (size_t val : vals) {
     cml_prod *= val;
@@ -141,7 +145,7 @@ std::vector<ssize_t> reverse_cml_prod(std::vector<size_t> vals) {
 LogicalIndex flat_idx_to_idx(const FlatLogicalIndex &idx,
                              std::vector<size_t> shape) {
   size_t flat_idx = idx.idx;
-  if (flat_idx >= product(shape)) {
+  if (flat_idx >= product_ints(shape)) {
     throw std::out_of_range("Index into tensor out of range.");
   }
 
@@ -157,7 +161,7 @@ LogicalIndex flat_idx_to_idx(const FlatLogicalIndex &idx,
 LogicalIndex flat_idx_to_idx_skip_dim(const FlatLogicalIndex &idx,
                              std::vector<size_t> shape, size_t skip_dim) {
   size_t flat_idx = idx.idx;
-  if (flat_idx >= product(shape)) {
+  if (flat_idx >= product_ints(shape)) {
     throw std::out_of_range("Index into tensor out of range.");
   }
 
@@ -292,10 +296,10 @@ FloatTensor FloatTensor::zeros(std::vector<size_t> shape, Device dev) {
   FloatBlock *block_raw;
   switch (dev) {
   case Device::CPU:
-    block_raw = FloatBlock::zeros_cpu(product(shape));
+    block_raw = FloatBlock::zeros_cpu(product_ints(shape));
     break;
   case Device::GPU:
-    block_raw = FloatBlock::zeros_gpu(product(shape));
+    block_raw = FloatBlock::zeros_gpu(product_ints(shape));
     break;
   }
   std::shared_ptr<FloatBlock> block(block_raw);
@@ -326,7 +330,7 @@ FloatTensor FloatTensor::from_list_1d(std::vector<float> vals, Device dev) {
 }
 
 FloatTensor FloatTensor::uninitialized(std::vector<size_t> shape, Device dev) {
-  FloatBlock *block_raw = FloatBlock::uninitialized(product(shape), dev);
+  FloatBlock *block_raw = FloatBlock::uninitialized(product_ints(shape), dev);
   std::shared_ptr<FloatBlock> block(block_raw);
   size_t dim = shape.size();
   size_t offset = 0;
@@ -338,10 +342,10 @@ FloatTensor FloatTensor::randn(std::vector<size_t> shape, Device dev) {
   FloatBlock *block_raw;
   switch (dev) {
   case Device::CPU:
-    block_raw = FloatBlock::randn_cpu(product(shape));
+    block_raw = FloatBlock::randn_cpu(product_ints(shape));
     break;
   case Device::GPU:
-    block_raw = FloatBlock::randn_gpu(product(shape));
+    block_raw = FloatBlock::randn_gpu(product_ints(shape));
     break;
   }
   std::shared_ptr<FloatBlock> block(block_raw);
@@ -386,7 +390,7 @@ void FloatTensor::set_raw_idx(size_t idx, float val) {
   this->block_->set_raw_idx(idx, val);
 }
 
-size_t FloatTensor::numel() { return product(this->shape_); }
+size_t FloatTensor::numel() { return product_ints(this->shape_); }
 
 LogicalIndex FloatTensor::validate_and_normalize_idx(const LogicalIndex &idx) {
   if (idx.coords.size() != this->dim_) {
@@ -550,11 +554,11 @@ FloatTensor::validate_new_shape(std::vector<ssize_t> new_shape) {
 
   if (count == 1) {
     // new_shape includes -1 and all the other dims
-    ssize_t product_other_dims = -product(new_shape);
+    ssize_t product_other_dims = -product_ints(new_shape);
     new_shape[idx] = this->numel() / product_other_dims;
   }
 
-  if (product(new_shape) != this->numel()) {
+  if (product_ints(new_shape) != this->numel()) {
     throw std::invalid_argument("Invalid shape: product of dimensions of new "
                                 "shape must match size of existing tensor.");
   }
@@ -746,7 +750,7 @@ FloatTensor FloatTensor::unsqueeze(ssize_t new_idx) {
   // maintain contiguity: if the original tensor was contiguous,
   // the unsqueezed tensor should be contiguous as well
   new_strides[new_idx] =
-      (new_idx == 0) ? product(this->shape_) : this->strides_[new_idx - 1];
+      (new_idx == 0) ? product_ints(this->shape_) : this->strides_[new_idx - 1];
   for (int i = new_idx; i < this->dim_; i++) {
     new_shape[i + 1] = this->shape_[i];
     new_strides[i + 1] = this->strides_[i];
@@ -1187,7 +1191,7 @@ FloatTensor FloatTensor::matmul(FloatTensor &other) {
     launch_matmul(this, &other, &result);
   } else {
     // generic CPU code
-    for (size_t flat_result_idx = 0; flat_result_idx < product(result_shape);
+    for (size_t flat_result_idx = 0; flat_result_idx < product_ints(result_shape);
          flat_result_idx++) {
       // set up indices into all three tensors for the loop
       LogicalIndex result_idx =
@@ -1432,6 +1436,21 @@ struct SumOp {
 	float operator()(float acc, float val) const {return acc + val;}
 };
 
+struct ProductOp {
+	float initial_value() { return 1.0f; }
+	float operator()(float acc, float val) const {return acc * val;}
+};
+
+struct MaxOp {
+	float initial_value() { return -std::numeric_limits<float>::infinity(); }
+	float operator()(float acc, float val) const {return std::max(acc, val);}
+};
+
+struct MinOp {
+	float initial_value() { return std::numeric_limits<float>::infinity(); }
+	float operator()(float acc, float val) const {return std::min(acc, val);}
+};
+
 // wrapper functions for individual operations
 
 // sum along the red_dim dimension
@@ -1461,4 +1480,81 @@ FloatTensor FloatTensor::sum(ssize_t red_dim) {
 }
 
 
+FloatTensor FloatTensor::product(ssize_t red_dim) {
+	// validate red_dim and compute new shape
+  if (red_dim < 0) { red_dim += this->dim_; }
+
+  if (red_dim < 0 || red_dim >= this->dim_) {
+    throw std::invalid_argument("Invalid dimension as input to sum().");
+  }
+
+  std::vector<size_t> new_shape{};
+  for (int idx = 0; idx < this->dim_; idx++) {
+	  if (idx == red_dim) { continue; }
+	  new_shape.push_back(this->shape_[idx]);
+  }
+  
+  FloatTensor result = FloatTensor::uninitialized(new_shape, this->dev_());
+
+  if (this->dev_() == Device::GPU) {
+    launch_product(this, &result, red_dim);
+  } else {
+	  this->reduce_op(result, red_dim, ProductOp{});
+  }
+
+  return result;
+}
+
+
+FloatTensor FloatTensor::max(ssize_t red_dim) {
+	// validate red_dim and compute new shape
+  if (red_dim < 0) { red_dim += this->dim_; }
+
+  if (red_dim < 0 || red_dim >= this->dim_) {
+    throw std::invalid_argument("Invalid dimension as input to sum().");
+  }
+
+  std::vector<size_t> new_shape{};
+  for (int idx = 0; idx < this->dim_; idx++) {
+	  if (idx == red_dim) { continue; }
+	  new_shape.push_back(this->shape_[idx]);
+  }
+  
+  FloatTensor result = FloatTensor::uninitialized(new_shape, this->dev_());
+
+  if (this->dev_() == Device::GPU) {
+    launch_max(this, &result, red_dim);
+  } else {
+	  this->reduce_op(result, red_dim, MaxOp{});
+  }
+
+  return result;
+}
+
+
+
+FloatTensor FloatTensor::min(ssize_t red_dim) {
+	// validate red_dim and compute new shape
+  if (red_dim < 0) { red_dim += this->dim_; }
+
+  if (red_dim < 0 || red_dim >= this->dim_) {
+    throw std::invalid_argument("Invalid dimension as input to sum().");
+  }
+
+  std::vector<size_t> new_shape{};
+  for (int idx = 0; idx < this->dim_; idx++) {
+	  if (idx == red_dim) { continue; }
+	  new_shape.push_back(this->shape_[idx]);
+  }
+  
+  FloatTensor result = FloatTensor::uninitialized(new_shape, this->dev_());
+
+  if (this->dev_() == Device::GPU) {
+    launch_min(this, &result, red_dim);
+  } else {
+	  this->reduce_op(result, red_dim, MinOp{});
+  }
+
+  return result;
+}
 

@@ -231,3 +231,12 @@ class FloatTensor:
 	def sum(self, dim):
 		return FloatTensor(self._base.sum(dim))
 
+	def product(self, dim):
+		return FloatTensor(self._base.product(dim))
+
+	def max(self, dim):
+		return FloatTensor(self._base.max(dim))
+
+	def min(self, dim):
+		return FloatTensor(self._base.min(dim))
+

@@ -1,3 +1,5 @@
+#include <cmath>
+#include <limits>
 #include <stdexcept>
 
 #include "cuda_utils.h"
@@ -65,7 +67,34 @@ struct SumOp {
 	__host__ __device__ float operator()(float acc, float val) const {return acc + val;}
 };
 
+struct ProductOp {
+	__host__ __device__ float initial_value() { return 1.0f; }
+	__host__ __device__ float operator()(float acc, float val) const {return acc * val;}
+};
+
+struct MaxOp {
+	__host__ __device__ float initial_value() { return -INFINITY; }
+	__host__ __device__ float operator()(float acc, float val) const {return (acc > val) ? acc : val;}
+};
+
+struct MinOp {
+	__host__ __device__ float initial_value() { return INFINITY; }
+	__host__ __device__ float operator()(float acc, float val) const {return (acc < val) ? acc : val;}
+};
+
 void launch_sum(FloatTensor *in, FloatTensor *out, size_t red_dim) {
   launch_reduce_kernel(in, out, red_dim, SumOp{});
+}
+
+void launch_product(FloatTensor *in, FloatTensor *out, size_t red_dim) {
+  launch_reduce_kernel(in, out, red_dim, ProductOp{});
+}
+
+void launch_max(FloatTensor *in, FloatTensor *out, size_t red_dim) {
+  launch_reduce_kernel(in, out, red_dim, MaxOp{});
+}
+
+void launch_min(FloatTensor *in, FloatTensor *out, size_t red_dim) {
+  launch_reduce_kernel(in, out, red_dim, MinOp{});
 }
 
