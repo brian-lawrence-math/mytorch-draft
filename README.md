@@ -31,7 +31,7 @@ Tensor:
 
 Along the way I got distracted trying to optimize matrix multiplication.
 It's still a work in progress, 
-but I got some big gains (8x improvement from the naive first kernel!)
+but I got some big gains (12x improvement from the naive first kernel!)
 and I learned a lot about the physical limitations of memory on GPU.
 Read more about it [here](https://brian-lawrence-math.github.io/opt).
 
