@@ -1010,6 +1010,7 @@ FloatTensor FloatTensor::repeat(std::vector<size_t> n_repeats) {
 // =================== Memory management ==========================
 Device FloatTensor::dev_() { return this->block_->dev; }
 
+// Clones the underlying data block, and copies shapes and strides
 FloatTensor FloatTensor::clone() {
   std::shared_ptr<FloatBlock> new_block(this->block_->clone(this->dev_()));
   return FloatTensor(new_block, dim_, shape_, offset_, strides_);
@@ -1341,6 +1342,11 @@ struct ReLUOp {
   float operator()(float x) const { return x > 0.0f ? x : 0.0f; }
 };
 
+struct ScalarMulOp {
+  float c;
+  float operator()(float x) const { return x * c; }
+};
+
 // ============ wrapper functions for various operations
 FloatTensor FloatTensor::abs() {
   FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
@@ -1397,6 +1403,18 @@ FloatTensor FloatTensor::relu() {
     launch_relu(this, &result);
   } else {
     this->pointwise_op(result, ReLUOp{});
+  }
+
+  return result;
+}
+
+FloatTensor FloatTensor::scalar_mul(float c) {
+  FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
+
+  if (this->dev_() == Device::GPU) {
+    launch_scalar_mul(this, &result, c);
+  } else {
+	this->pointwise_op(result, ScalarMulOp{c});
   }
 
   return result;
@@ -1557,4 +1575,6 @@ FloatTensor FloatTensor::min(ssize_t red_dim) {
 
   return result;
 }
+
+// FloatTensor FloatTensor::mean(ssize_t red_dim) {
 

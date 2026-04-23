@@ -69,6 +69,11 @@ struct ReLUOp {
   __host__ __device__ float operator()(float x) const { return x > 0 ? x : 0; }
 };
 
+struct ScalarMulOp {
+	float c;
+	__host__ __device__ float operator()(float x) const { return x * this->c; }
+};
+
 void launch_abs(FloatTensor *in, FloatTensor *out) {
   launch_pointwise_kernel(in, out, AbsOp{});
 }
@@ -87,4 +92,8 @@ void launch_sqrt(FloatTensor *in, FloatTensor *out) {
 
 void launch_relu(FloatTensor *in, FloatTensor *out) {
   launch_pointwise_kernel(in, out, ReLUOp{});
+}
+
+void launch_scalar_mul(FloatTensor *in, FloatTensor *out, float c) {
+	launch_pointwise_kernel(in, out, ScalarMulOp{c});
 }

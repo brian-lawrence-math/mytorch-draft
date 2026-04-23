@@ -69,4 +69,6 @@ Most operations block on deviceSynchronize()
 Most operations not optimized
 reshape() always copies memory (pytorch creates a view when possible)
 expand() does not allow additional dimensions to be added
+clone() clones all raw data, rather than making it contiguous
+contiguous_clone() makes it contiguous
 

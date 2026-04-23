@@ -210,6 +210,15 @@ class FloatTensor:
 	def __mul__(self, other):
 		return self.mul(other)
 
+	def __rmul__(self, other): # other * self
+		if isinstance(other, (int, float)):
+			return self.scalar_mul(other)
+		elif isinstance(other, FloatTensor): # should not happen
+			return other.__mul__(self)
+
+	def __neg__(self):
+		return self.__rmul__(-1)
+
 	def __matmul__(self, other):
 		return self.matmul(other)
 
@@ -227,6 +236,9 @@ class FloatTensor:
 
 	def relu(self):
 		return FloatTensor(self._base.relu())
+
+	def scalar_mul(self, other):
+		return FloatTensor(self._base.scalar_mul(other))
 
 	def sum(self, dim):
 		return FloatTensor(self._base.sum(dim))

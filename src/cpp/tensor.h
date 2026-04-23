@@ -95,6 +95,7 @@ struct FloatTensor {
   FloatTensor log();
   FloatTensor sqrt();
   FloatTensor relu();
+  FloatTensor scalar_mul(float c);
 
 
 
