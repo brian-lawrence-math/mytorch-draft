@@ -59,8 +59,10 @@ PYBIND11_MODULE(_core, mytorch, py::mod_gil_not_used()) {
       .def("sqrt", &FloatTensor::sqrt)
       .def("relu", &FloatTensor::relu)
       .def("scalar_mul", &FloatTensor::scalar_mul)
+      .def("reciprocal", &FloatTensor::reciprocal)
 	  .def("sum", &FloatTensor::sum)
 	  .def("product", &FloatTensor::product)
 	  .def("max", &FloatTensor::max)
-	  .def("min", &FloatTensor::min);
+	  .def("min", &FloatTensor::min)
+	  .def("mean", &FloatTensor::mean);
 }

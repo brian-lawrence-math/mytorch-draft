@@ -2,6 +2,34 @@ from ._core import Device, FloatTensor as _FloatTensor
 CPU = Device.CPU
 GPU = Device.GPU
 
+# dimension handling for reduce ops
+def reduce_op_smart_dim(fn):
+	# input: fn(tensor, dim: int)
+	# output: a reduction function that handles:
+	#  - dim: int (original behavior)
+	#  - dim: list[int] (reduce along all listed dims)
+	#  - dim: None (reduce along all dims)
+	#  - keepdim: bool -- if True, keep the reduced dim with shape of 1
+	def fn_with_options(tensor, dims=None, *, keepdim=False):
+		if isinstance(dims, int):
+			dim = dims
+			tensor = fn(tensor, dim)
+			if keepdim:
+				tensor = tensor.unsqueeze(dim)
+			return tensor
+		if dims is None:
+			dims = [x for x in range(tensor.dim)]
+		if isinstance(dims, list):
+			for dim in dims:
+				tensor = fn(tensor, dim)
+				tensor = tensor.unsqueeze(dim)  # keep dim indexing valid
+			if not keepdim:
+				for dim in sorted(dims, reverse=True):
+					tensor = tensor.squeeze(dim)
+			return tensor
+		raise ValueError("Reduction function requires dims to be int or list[int].")
+	return fn_with_options
+
 class FloatTensor:
 	def __init__(self, _base: _FloatTensor):
 		self._base = _base
@@ -222,6 +250,9 @@ class FloatTensor:
 	def __matmul__(self, other):
 		return self.matmul(other)
 
+	def __truediv__(self, other):
+		return FloatTensor(self._base.mul(other._base.reciprocal()))
+
 	def abs(self):
 		return FloatTensor(self._base.abs())
 
@@ -240,15 +271,49 @@ class FloatTensor:
 	def scalar_mul(self, other):
 		return FloatTensor(self._base.scalar_mul(other))
 
+	@reduce_op_smart_dim
 	def sum(self, dim):
 		return FloatTensor(self._base.sum(dim))
 
+	@reduce_op_smart_dim
 	def product(self, dim):
 		return FloatTensor(self._base.product(dim))
 
+	@reduce_op_smart_dim
 	def max(self, dim):
 		return FloatTensor(self._base.max(dim))
 
+	@reduce_op_smart_dim
 	def min(self, dim):
 		return FloatTensor(self._base.min(dim))
+
+	@reduce_op_smart_dim
+	def mean(self, dim):
+		return FloatTensor(self._base.mean(dim))
+
+	# Implementing var(), std(), softmax()
+	# in Python for correct handling when type(dim) == list:
+	# these reductions cannot be handled by reducing one dim at a time
+	def var(self, dim=None):
+		mean = self.mean(dim)
+		meansquare = (self*self).mean(dim)
+		return meansquare - mean * mean
+
+	def std(self, dim=None):
+		return self.var(dim).sqrt()
+
+	# Trick for numerical stability:
+	# Translate each "row" (i.e. softmaxxed dimension) so that its maximum is zero
+	# before the exponential.
+	def softmax(self, dim=None):
+		# compute max (and expand)
+		max_per_row = self.max(dim, keepdim=True).expand(self.shape)
+		# subtract
+		self_shifted = self - max_per_row
+		# exp
+		unscaled_probs = self_shifted.exp()
+		# sum
+		scaling = unscaled_probs.sum(dim, keepdim=True).expand(self.shape)
+		# divide
+		return unscaled_probs / scaling
 

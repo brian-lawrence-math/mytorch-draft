@@ -1347,6 +1347,10 @@ struct ScalarMulOp {
   float operator()(float x) const { return x * c; }
 };
 
+struct ReciprocalOp {
+  float operator()(float x) const { return 1.0f / x; }
+};
+
 // ============ wrapper functions for various operations
 FloatTensor FloatTensor::abs() {
   FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
@@ -1415,6 +1419,18 @@ FloatTensor FloatTensor::scalar_mul(float c) {
     launch_scalar_mul(this, &result, c);
   } else {
 	this->pointwise_op(result, ScalarMulOp{c});
+  }
+
+  return result;
+}
+
+FloatTensor FloatTensor::reciprocal() {
+  FloatTensor result = FloatTensor::uninitialized(this->shape_, this->dev_());
+
+  if (this->dev_() == Device::GPU) {
+    launch_reciprocal(this, &result);
+  } else {
+    this->pointwise_op(result, ReciprocalOp{});
   }
 
   return result;
@@ -1576,5 +1592,7 @@ FloatTensor FloatTensor::min(ssize_t red_dim) {
   return result;
 }
 
-// FloatTensor FloatTensor::mean(ssize_t red_dim) {
+FloatTensor FloatTensor::mean(ssize_t red_dim) {
+	return this->sum(red_dim).scalar_mul(1.0f / this->shape_[red_dim]);
+}
 

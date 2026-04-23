@@ -96,6 +96,7 @@ struct FloatTensor {
   FloatTensor sqrt();
   FloatTensor relu();
   FloatTensor scalar_mul(float c);
+  FloatTensor reciprocal();
 
 
 
@@ -106,6 +107,7 @@ struct FloatTensor {
   FloatTensor product(ssize_t red_dim);
   FloatTensor max(ssize_t red_dim);
   FloatTensor min(ssize_t red_dim);
+  FloatTensor mean(ssize_t red_dim);
 };
 
 #endif
